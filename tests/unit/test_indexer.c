@@ -672,6 +672,42 @@ static void test_long_path(void)
     free(base);
 }
 
+/* Long components cover PATH_MAX; this fixture instead stresses depth and
+ * ancestor propagation through 512 levels with short component names. */
+static void test_deep_tree(void)
+{
+    mk_dir("deep-tree");
+    th_strbuf rel;
+    th_sb_init(&rel);
+    th_sb_puts(&rel, "deep-tree");
+    for (int i = 0; i < 512; i++) {
+        th_sb_puts(&rel, "/d");
+        mk_dir(rel.data);
+    }
+    th_sb_puts(&rel, "/leaf");
+    mk_file(rel.data, 7);
+    sqlite3 *db = open_db("deep.sqlite3");
+    char *root = tpath("deep-tree");
+    int64_t rid = th_db_root_ensure(db, root);
+    CHECK_INT(scan(db, rid, NULL, NULL), TH_SCAN_OK);
+    CHECK_INT(th_db_entry_count(db), 514);
+    th_entry before = {0}, after = {0};
+    REQUIRE(get(db, rel.data, &before) == 1);
+    int64_t total = agg_size(db, "deep-tree");
+    mk_file(rel.data, 107);
+    CHECK_INT(scan(db, rid, NULL, NULL), TH_SCAN_OK);
+    REQUIRE(get(db, rel.data, &after) == 1);
+    CHECK_INT(after.id, before.id);
+    CHECK_INT(after.size, 107);
+    CHECK_INT(agg_size(db, "deep-tree"), total + 100);
+    check_consistent(db);
+    th_entry_clear(&before);
+    th_entry_clear(&after);
+    th_db_close(db);
+    th_sb_free(&rel);
+    free(root);
+}
+
 static void test_mountinfo(void)
 {
     const char *text =
@@ -725,6 +761,7 @@ int main(void)
     RUN(test_nested_roots_and_offline);
     RUN(test_excludes);
     RUN(test_long_path);
+    RUN(test_deep_tree);
     rm_tree(tmpdir);
     return TEST_EXIT();
 }
