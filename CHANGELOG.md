@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Live root loss retains Offline state and cached records. Watches are released for detached roots and moved-out directory subtrees; explicit verification reinstalls coverage after reconnection.
+
 - Atomic same-root file and directory replacements now preserve the moved source and descendant identities, deleting the replaced destination within the move transaction. Real inotify regression covers both cases.
 
 ## 0.5.0 — 2026-10-08

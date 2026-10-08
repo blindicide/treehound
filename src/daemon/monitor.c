@@ -213,11 +213,27 @@ void monitor_stop(void)
     free(m.covered); m.covered = NULL; m.ncovered = 0;
     free(m.watches); m.watches = NULL; m.nwatches = m.npaths = 0;
 }
+/* Drop watches whose inode moved out of an indexed scope. Kernel watches
+ * follow the inode, so pathname reconciliation alone cannot release them. */
+static void release_watches(int64_t root, const char *path)
+{
+    pthread_mutex_lock(&m.mu);
+    size_t keep = 0;
+    for (size_t i = 0; i < m.nwatches; i++) {
+        watch *w = &m.watches[i];
+        if (w->root == root && (!path || th_path_is_within(w->path, path))) {
+            if (m.running) inotify_rm_watch(m.fd, w->wd);
+            free(w->path);
+        } else m.watches[keep++] = *w;
+    }
+    m.nwatches = keep;
+    pthread_mutex_unlock(&m.mu);
+}
 /* Preserve identity when both halves of a same-root move are observed.
  * Raw-byte paths use substr on BLOBs, avoiding Unicode character offsets. */
 static int apply_move(sqlite3 *db, const move *mv)
 {
-    if (!mv->to) return 0;
+    if (!mv->to) { release_watches(mv->root, mv->from); return 0; }
     th_entry src = {0}, parent = {0};
     char *dir = th_xstrdup(mv->to); char *slash = strrchr(dir, '/');
     if (!slash) { free(dir); return -1; }
@@ -329,8 +345,12 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
             stats->dirs += st.dirs; stats->entries += st.entries; stats->added += st.added;
             stats->updated += st.updated; stats->removed += st.removed; stats->errors += st.errors;
         }
-        th_db_root_set_state(db, root, rc == TH_SCAN_OK ? TH_STATE_VERIFIED : TH_STATE_STALE, NULL);
+        if (rc != TH_SCAN_OFFLINE)
+            th_db_root_set_state(db, root, rc == TH_SCAN_OK ? TH_STATE_VERIFIED :
+                rc == TH_SCAN_FAILED ? TH_STATE_ERROR : TH_STATE_STALE,
+                rc == TH_SCAN_FAILED && err ? err->data : NULL);
     }
+    if (rc == TH_SCAN_OFFLINE) release_watches(root, NULL);
     for (size_t i = 0; i < nw; i++) free(work[i].path);
     pthread_mutex_lock(&m.mu); bool failed = m.failed; pthread_mutex_unlock(&m.mu);
     if (rc == TH_SCAN_OK && (failed || stats->errors))

@@ -32,7 +32,9 @@ visit affected directories and newly discovered subtrees, preserving unchanged
 subtrees. Same-root paired moves update raw-byte paths and parent relations in
 SQL, preserving descendant IDs and watch paths. Atomic replacements delete the
 old destination inside the same transaction before moving the source. Unpaired moves converge through
-parent diffs. Overflow, unmount and dirty-queue exhaustion request whole-root
+parent diffs and release watches for moved-out subtrees. Offline roots retain
+cached records and release their watches; verification or periodic reconciliation
+reinstalls coverage when a root returns. Overflow, unmount and dirty-queue exhaustion request whole-root
 reconciliation; watch failures and enumeration errors leave roots Stale with
 warnings. No watch limits are changed. Periodic reconciliation is a configurable
 safety net, not the normal live-update path. The event thread blocks on inotify

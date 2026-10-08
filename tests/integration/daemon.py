@@ -179,6 +179,36 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         seq = call("rebuild", root_id=roots[0]["id"])["seq"]
         assert wait_idle()["completed_seq"] >= seq
         assert call("search", query="offline")["items"]
+        # A moved-out directory must release its watches, including descendants.
+        departed = root / "departed"
+        (departed / "child").mkdir(parents=True)
+        (departed / "child" / "outgoing.txt").write_bytes(b"before")
+        eventually("outgoing.txt", 1); wait_idle()
+        outside = base / "outside"
+        departed.rename(outside)
+        eventually("outgoing.txt", 0); wait_idle()
+        completed = call("status")["completed_seq"]
+        (outside / "child" / "outgoing.txt").write_bytes(b"outside the configured root")
+        time.sleep(.2)
+        assert call("status")["completed_seq"] == completed, "moved-out directory still monitored"
+        # Live loss of a root must preserve cached records and report Offline.
+        disconnected = base / "live-disconnected"
+        root.rename(disconnected)
+        deadline = time.monotonic() + 5
+        while True:
+            state = next(r for r in call("roots")["roots"] if r["path"] == str(root))["status"]
+            if state == "offline": break
+            assert time.monotonic() < deadline, f"disconnected root reported {state}"
+            time.sleep(.02)
+        assert call("search", query="offline.txt")["items"]
+        wait_idle(); completed = call("status")["completed_seq"]
+        (disconnected / "offline.txt").write_bytes(b"offline edit while detached")
+        time.sleep(.2)
+        assert call("status")["completed_seq"] == completed, "offline root still monitored"
+        disconnected.rename(root)
+        seq = call("verify", root_id=root_id)["seq"]
+        assert wait_idle()["completed_seq"] >= seq
+        assert next(r for r in call("roots")["roots"] if r["path"] == str(root))["status"] == "verified"
         # Exercise the kernel's actual overflow path without changing sysctls.
         limit = int(pathlib.Path("/proc/sys/fs/inotify/max_queued_events").read_text())
         assert limit <= 1000000, "host queue too large for bounded overflow fixture"
