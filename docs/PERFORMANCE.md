@@ -82,6 +82,16 @@ benchmark harness also retains partial failure evidence and checks page IDs.
 The one-second query guard remains; arbitrary deep offsets or expensive filters
 can still require refining the query.
 
+## Post-run index integrity
+
+A separate read-only audit of the retained v0.5.1 million-entry database returned
+`PRAGMA integrity_check = ok`, no foreign-key violations and exactly 1,000,000
+FTS `item` matches. All 1,001 directory aggregates equal their own metadata plus
+correctly deduplicated immediate-child weights, and all indexed parent paths
+and directory types are consistent. [Raw integrity and aggregate audit](benchmarks/v0.5.1-integrity.json)
+records the checks and execution time; it does not imply physical-filesystem
+certification.
+
 ## Correctness and remaining validation gaps
 
 Tests exercise actual sparse files, multiple hard-link paths, invalid UTF-8,

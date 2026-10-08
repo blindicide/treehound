@@ -1,0 +1,26 @@
+{
+  "integrity": {
+    "database": "patch051final.db",
+    "read_only": true,
+    "integrity": [
+      "ok"
+    ],
+    "foreign_key_violations": [],
+    "entries": 1001001,
+    "fts_item_matches": 1000000,
+    "seconds": 9.296338522981387,
+    "measured_at_utc": "2026-10-08T22:49:51Z"
+  },
+  "aggregates": {
+    "database": "patch051final.db",
+    "read_only": true,
+    "checked_directories": 1001,
+    "aggregate_mismatches": [],
+    "parent_path_mismatches": 0,
+    "seconds": 0.6419244579738006,
+    "measured_at_utc": "2026-10-08T22:50:22Z"
+  },
+  "code_commit": "7bef60b4091526eace7d498d729c0734dbe96dd0",
+  "release_tag": "v0.5.1",
+  "note": "Read-only checks after the clean-code million-file benchmark, with the daemon stopped; no database mutations."
+}

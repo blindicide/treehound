@@ -38,8 +38,9 @@ Root totals remain complete subject to the index's documented size semantics.
 IPC returns at most 365 ordered captures and 20 common-path changes.
 
 Schema 2→3 adds the ordered `(name COLLATE NOCASE, name, path)` index.
-Broad name-sorted searches probe at most 4,097 FTS postings, then test FTS
-membership while streaming the ordered index. Selective searches keep the
+Broad name-sorted searches probe at most 4,097 FTS postings, then stream the
+ordered filename index and enforce exact terms/filters. They avoid redundant
+per-row FTS posting-list probes, including on deep pages. Selective searches keep the
 rowid-driven plan; optional total-count requests use that plan as well. All
 matching and filters still run exactly, with the one-second IPC query guard.
 
