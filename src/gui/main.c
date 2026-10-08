@@ -166,7 +166,7 @@ static void map_populate(Ui *u, const th_jval *res)
 static gboolean map_smoke_navigate(gpointer data);
 static void map_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
 {
-    (void)area; Ui *u = data; size_t n = u->tiles->len; double weights[513]; th_rect rectangles[513];
+    (void)area; Ui *u = data; size_t n = u->tiles->len; double weights[513] = {0}; th_rect rectangles[513];
     for (size_t i = 0; i < n; i++) weights[i] = g_array_index(u->tiles, Tile, i).weight;
     th_treemap(weights, n, (th_rect){0,0,(double)width,(double)height}, rectangles);
     bool any = false;

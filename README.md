@@ -4,7 +4,7 @@ Native Linux disk-usage browsing and indexed filename/path search, written in C1
 
 **v0.3 visual analysis:** persistent indexing, asynchronous GTK explorer/search, CLI and live inotify updates. Native DEB/RPM install, reinstall, GUI/CLI smoke and removal gates have passed in Debian 13 and Fedora 44. Interactive treemap uses indexed logical/allocated sizes, tooltips and directory navigation. History and large-filesystem performance verification follow in the roadmap.
 
-[Latest release](https://github.com/blindicide/treehound/releases/latest) · [DEB](https://github.com/blindicide/treehound/releases/latest/download/treehound_0.3.0_amd64.deb) · [RPM](https://github.com/blindicide/treehound/releases/latest/download/treehound-0.3.0-1.x86_64.rpm)
+[Latest release](https://github.com/blindicide/treehound/releases/latest) · [DEB](https://github.com/blindicide/treehound/releases/latest/download/treehound_0.3.1_amd64.deb) · [RPM](https://github.com/blindicide/treehound/releases/latest/download/treehound-0.3.1-1.x86_64.rpm)
 
 ![Actual GTK indexed explorer under Xvfb](docs/screenshots/explorer.png)
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 — 2026-10-08
+
+- Initialize empty treemap weights for strict optimized GCC builds; v0.3.0 publication was blocked by this compiler diagnostic.
+
 ## 0.3.0 — 2026-10-08
 
 - Interactive Cairo treemap: indexed directory scope, logical/allocated metrics, type colors, byte-safe path tooltips and directory click navigation.
