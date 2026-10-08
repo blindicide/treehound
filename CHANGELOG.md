@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Watch-registration failures are scoped to the affected root. A full verification retries coverage and clears a transient failure; a test-only linker wrapper verifies ENOSPC isolation and real live-update recovery without changing system limits.
+
 - Successful full reconciliations prune watches outside the newly enumerated scope. Adding/removing a directory exclusion releases/reinstalls kernel coverage without background scan churn.
 
 - IPC sends and client calls now use monotonic deadlines across partial I/O. Saturated listener probes fail promptly without unlinking the live daemon socket; oversized client requests are rejected before connecting.

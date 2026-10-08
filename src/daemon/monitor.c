@@ -16,7 +16,7 @@
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR | IN_DONT_FOLLOW)
 typedef struct { int wd; int64_t root; char *path; uint64_t scan; } watch;
 typedef struct { int64_t root; char *path; } dirty;
-typedef struct { int64_t root; uint64_t epoch; bool snapshot, forced; } coverage;
+typedef struct { int64_t root; uint64_t epoch; bool snapshot, forced, failed; } coverage;
 typedef struct { uint32_t cookie; int64_t root; char *from, *to; } move;
 static struct {
     pthread_mutex_t mu;
@@ -42,9 +42,10 @@ bool monitor_pending(int64_t root)
     bool result = m.full || m.failed;
     if (root) {
         bool found = false;
-        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].forced || m.covered[i].epoch != m.epoch; }
+        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].failed || m.covered[i].forced || m.covered[i].epoch != m.epoch; }
         result |= !found;
     }
+    if (!root) for (size_t i = 0; i < m.ncovered; i++) result |= m.covered[i].failed;
     for (size_t i = 0; i < m.npaths && !result; i++) result = !root || m.paths[i].root == root;
     pthread_mutex_unlock(&m.mu);
     return result;
@@ -107,8 +108,9 @@ static void add_watch(int64_t id, const char *path, size_t len, int64_t root, ui
     pthread_mutex_lock(&m.mu);
     int wd = inotify_add_watch(m.fd, path, WATCH_MASK);
     if (wd < 0) {
-        if (!m.failed) th_log(TH_LOG_WARN, "inotify coverage incomplete: %s", strerror(errno));
-        m.failed = true;
+        size_t scope = root_scope(root);
+        if (!m.covered[scope].failed) th_log(TH_LOG_WARN, "inotify coverage incomplete for root %lld: %s", (long long)root, strerror(errno));
+        m.covered[scope].failed = true;
     } else {
         size_t i;
         for (i = 0; i < m.nwatches; i++) if (m.watches[i].wd == wd) break;
@@ -348,6 +350,9 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     bool enumerate = full || (!m.running && nw == 0);
     pthread_mutex_lock(&m.mu);
     uint64_t scan = enumerate ? ++m.watch_scan : 0;
+    bool previous_failure = m.covered[scope].failed;
+    /* Only a full retry can prove a prior coverage gap has closed. */
+    if (enumerate) m.covered[scope].failed = false;
     pthread_mutex_unlock(&m.mu);
     scan_data data = {opts, root, scan};
     th_scan_opts o = *opts;
@@ -372,7 +377,10 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     if (enumerate && rc == TH_SCAN_OK && !stats->errors) prune_watches(root, scan);
     if (rc == TH_SCAN_OFFLINE) release_watches(root, NULL);
     for (size_t i = 0; i < nw; i++) free(work[i].path);
-    pthread_mutex_lock(&m.mu); bool failed = m.failed; pthread_mutex_unlock(&m.mu);
+    pthread_mutex_lock(&m.mu);
+    if (enumerate && (rc != TH_SCAN_OK || stats->errors)) m.covered[scope].failed |= previous_failure;
+    bool failed = m.failed || m.covered[scope].failed;
+    pthread_mutex_unlock(&m.mu);
     if (rc == TH_SCAN_OK && (failed || stats->errors))
         th_db_root_set_state(db, root, TH_STATE_STALE, failed ? "inotify coverage incomplete" : "enumeration incomplete");
     if (rc == TH_SCAN_OK && !failed && !stats->errors && !monitor_pending(root)) {
