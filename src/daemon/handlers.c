@@ -3,6 +3,7 @@
 #include "monitor.h"
 #include "treehound/common.h"
 #include "treehound/db.h"
+#include "treehound/history.h"
 #include "treehound/match.h"
 #include "treehound/search.h"
 #include "treehound/mounts.h"
@@ -118,6 +119,13 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
             th_jw_kv_int(&w, "last_verified", r->last_verified); th_jw_obj_end(&w);
         }
         th_jw_arr_end(&w); th_roots_free(roots, n);
+    } else if (!strcmp(cmd, "history")) {
+        if (th_history_reply(*db, th_json_get_int(q,"root_id",0), &w) != 0) { failure(out,"request","invalid history root or database query failed"); goto done; }
+    } else if (!strcmp(cmd, "snapshot")) {
+        int64_t id = th_json_get_int(q,"root_id",0); th_root root = {0};
+        int found = id > 0 ? th_db_root_get(*db,id,&root) : 0; th_root_clear(&root);
+        if (found != 1) { failure(out,"request","snapshot requires an existing root_id"); goto done; }
+        monitor_snapshot(id); th_jw_kv_int(&w,"seq",(int64_t)daemon_enqueue(d,JOB_SCAN,id,false));
     } else if (!strcmp(cmd, "treemap")) {
         if (treemap_reply(*db, q, &w) != 0) { failure(out, "request", "invalid treemap scope or database query failed"); goto done; }
     } else if (!strcmp(cmd, "search") || !strcmp(cmd, "list")) {

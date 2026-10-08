@@ -22,7 +22,7 @@ typedef struct {
     GtkWidget *window, *roots, *search, *status, *breadcrumb, *view, *settings, *config_text;
     GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before, *exact, *global;
     GtkDropDown *sort, *types, *metric;
-    GtkWidget *stack, *map; GArray *tiles;
+    GtkWidget *stack, *map, *history_chart, *history_text; GArray *tiles, *snapshots;
     GListStore *model;
     GtkSingleSelection *selection;
     char *socket, *path, *pending;
@@ -66,6 +66,14 @@ static void worker(GTask *task, gpointer source, gpointer data, GCancellable *ca
                 }
             }
             g_clear_error(&spawn_error); g_free(daemon); g_free(directory);
+        }
+    }
+    if (res && w->kind == 9 && th_json_get_bool(res,"ok",false)) {
+        int64_t seq = th_json_get_int(res,"seq",0);
+        for (int i=0; i<200; i++) {
+            th_jval *status = th_ipc_call(w->socket,"{\"v\":1,\"cmd\":\"status\"}",strlen("{\"v\":1,\"cmd\":\"status\"}"),1000,&err);
+            bool complete = status && th_json_get_int(status,"completed_seq",0)>=seq;
+            th_json_free(status); if (complete) break; g_usleep(50000);
         }
     }
     if (!res) g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "%s", err.data ? err.data : "Daemon unavailable");
@@ -223,6 +231,42 @@ static gboolean map_smoke_navigate(gpointer data)
 }
 static void tab_changed(GObject *object, GParamSpec *param, gpointer data) { (void)object; (void)param; query(data); }
 
+typedef struct { int64_t time, size, allocated; } Snapshot;
+static void history_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+    (void)area; Ui *u=data; double max=1; bool allocated=gtk_drop_down_get_selected(u->metric)!=0;
+    for (guint i=0;i<u->snapshots->len;i++) { Snapshot v=g_array_index(u->snapshots,Snapshot,i); max=MAX(max,(double)(allocated?v.allocated:v.size)); }
+    cairo_set_source_rgb(cr,.4,.4,.4); cairo_move_to(cr,20,22); cairo_show_text(cr,allocated?"Allocated root size — oldest to newest":"Logical root size — oldest to newest");
+    if (!u->snapshots->len) return;
+    cairo_set_source_rgb(cr,.15,.45,.7); cairo_set_line_width(cr,2);
+    for (guint i=0;i<u->snapshots->len;i++) {
+        Snapshot v=g_array_index(u->snapshots,Snapshot,i);
+        double x=25+(double)i/MAX((double)u->snapshots->len-1,1.)*MAX(width-50,1);
+        double y=height-25-(double)(allocated?v.allocated:v.size)/max*MAX(height-60,1);
+        if (i) cairo_line_to(cr,x,y); else cairo_move_to(cr,x,y);
+    }
+    cairo_stroke(cr);
+    if (u->snapshots->len==1) { Snapshot v=g_array_index(u->snapshots,Snapshot,0); double y=height-25-(double)(allocated?v.allocated:v.size)/max*MAX(height-60,1); cairo_arc(cr,25,y,4,0,6.283185); cairo_fill(cr); }
+}
+static void history_populate(Ui *u,const th_jval *res)
+{
+    g_array_set_size(u->snapshots,0); GString *text=g_string_new("Root snapshots (up to 365 shown). Automatic capture after a successful reconciliation, at most once daily.\n");
+    const th_jval *items=th_json_get(res,"snapshots");
+    if (items) for(size_t i=0;i<items->n;i++) {
+        const th_jval *v=&items->items[i]; Snapshot snapshot={th_json_get_int(v,"time",0),th_json_get_int(v,"size",0),th_json_get_int(v,"allocated",0)}; g_array_append_val(u->snapshots,snapshot);
+        GDateTime *date=g_date_time_new_from_unix_local(snapshot.time); char *when=date?g_date_time_format(date,"%Y-%m-%d %H:%M:%S"):g_strdup("Unknown date");
+        g_string_append_printf(text,"%s   logical %lld B   allocated %lld B\n",when,(long long)snapshot.size,(long long)snapshot.allocated); g_free(when); if(date)g_date_time_unref(date);
+    }
+    if(u->snapshots->len>1) { Snapshot a=g_array_index(u->snapshots,Snapshot,u->snapshots->len-2),b=g_array_index(u->snapshots,Snapshot,u->snapshots->len-1); g_string_append_printf(text,"\nLast capture change: logical %+lld B; allocated %+lld B\n",(long long)(b.size-a.size),(long long)(b.allocated-a.allocated)); }
+    g_string_append(text,"\nLargest changes in directories present in both captures (largest 1024 directories retained per capture):\n");
+    items=th_json_get(res,"changes"); if(items)for(size_t i=0;i<items->n;i++) { const th_jval *v=&items->items[i]; char *path=g_utf8_make_valid(th_json_get_str(v,"path",""),-1); g_string_append_printf(text,"%+lld B logical / %+lld B allocated   %s\n",(long long)th_json_get_int(v,"size_delta",0),(long long)th_json_get_int(v,"allocated_delta",0),path); g_free(path); }
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(u->history_text)),text->str,-1);g_string_free(text,true);gtk_widget_queue_draw(u->history_chart);
+    gtk_label_set_text(GTK_LABEL(u->status),th_json_get_str(res,"status","indexed"));
+}
+static void snapshot_clicked(GtkButton *button,gpointer data)
+{
+    (void)button; Ui *u=data; if(u->root)submit(u,g_strdup_printf("{\"v\":1,\"cmd\":\"snapshot\",\"root_id\":%lld}",(long long)u->root),9);
+}
 static void received(GObject *source, GAsyncResult *result, gpointer data)
 {
     (void)source; Ui *u = data; GTask *task = G_TASK(result); Work *w = g_task_get_task_data(task);
@@ -269,7 +313,12 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
         } else if (w->kind == 7) {
             map_populate(u, res);
             if (u->smoke && u->smoke_stage == 2) { u->smoke_stage = 3; if (!u->tiles->len) u->smoke_failed = true; }
-            else if (u->smoke && u->smoke_stage == 4) { u->smoke_stage = 5; if (!u->tiles->len) u->smoke_failed = true; g_application_quit(G_APPLICATION(u->app)); }
+            else if (u->smoke && u->smoke_stage == 4) { u->smoke_stage = 5; if (!u->tiles->len) u->smoke_failed = true; gtk_stack_set_visible_child_name(GTK_STACK(u->stack),"history"); }
+        } else if (w->kind == 8) {
+            history_populate(u,res);
+            if(u->smoke && u->smoke_stage==5) { if(!u->snapshots->len)u->smoke_failed=true;u->smoke_stage=6; snapshot_clicked(NULL,u); }
+            else if(u->smoke && u->smoke_stage==6) { if(u->snapshots->len<2)u->smoke_failed=true;u->smoke_stage=7;g_application_quit(G_APPLICATION(u->app)); }
+        } else if (w->kind == 9) { query(u);
         } else if (w->kind == 6) {
             const th_jval *items = th_json_get(res, "items");
             if (items && items->n) { const th_jval *v = &items->items[0]; navigate(u, th_json_get_int(v, "root_id", 0), th_json_get_int(v, "id", 0), th_json_get_str(v, "path", ""), th_json_get_int(v, "size", 0)); }
@@ -300,6 +349,8 @@ static void submit(Ui *u, char *request, guint kind)
 static void query(Ui *u)
 {
     if (!u->parent || u->closing) return;
+    char *valid_path = g_utf8_make_valid(u->path,-1); gtk_label_set_text(GTK_LABEL(u->breadcrumb),valid_path); g_free(valid_path);
+    if (!strcmp(gtk_stack_get_visible_child_name(GTK_STACK(u->stack)),"history")) { submit(u,g_strdup_printf("{\"v\":1,\"cmd\":\"history\",\"root_id\":%lld}",(long long)u->root),8);return; }
     if (!strcmp(gtk_stack_get_visible_child_name(GTK_STACK(u->stack)), "treemap")) {
         char *request = g_strdup_printf("{\"v\":1,\"cmd\":\"treemap\",\"parent_id\":%lld,\"metric\":\"%s\",\"show_hidden\":%s}", (long long)u->parent,
             gtk_drop_down_get_selected(u->metric) ? "allocated" : "logical", gtk_check_button_get_active(GTK_CHECK_BUTTON(u->hidden)) ? "true" : "false");
@@ -443,7 +494,7 @@ static void preferences(Ui *u, bool save)
     } else if (g_key_file_load_from_file(key, path, G_KEY_FILE_NONE, NULL)) {
         for (size_t i = 0; i < 5; i++) gtk_check_button_set_active(GTK_CHECK_BUTTON(widgets[i]), g_key_file_get_boolean(key, "view", names[i], NULL));
         if (g_key_file_has_key(key,"view","metric",NULL)) gtk_drop_down_set_selected(u->metric,g_key_file_get_integer(key,"view","metric",NULL) == 0 ? 0u : 1u);
-        char *page = g_key_file_get_string(key,"view","page",NULL); if (page && !strcmp(page,"treemap")) gtk_stack_set_visible_child_name(GTK_STACK(u->stack),page); g_free(page);
+        char *page = g_key_file_get_string(key,"view","page",NULL); if (page && (!strcmp(page,"treemap") || !strcmp(page,"history"))) gtk_stack_set_visible_child_name(GTK_STACK(u->stack),page); g_free(page);
         int sort = g_key_file_get_integer(key, "view", "sort", NULL); if (sort >= 0 && sort < 5) gtk_drop_down_set_selected(u->sort, (guint)sort);
     }
     g_key_file_unref(key); free(path);
@@ -500,6 +551,10 @@ static void activate(GtkApplication *app, gpointer data)
     gtk_widget_set_has_tooltip(u->map,true); g_signal_connect(u->map,"query-tooltip",G_CALLBACK(map_tooltip),u);
     GtkGesture *click = gtk_gesture_click_new(); g_signal_connect(click,"pressed",G_CALLBACK(map_pressed),u); gtk_widget_add_controller(u->map,GTK_EVENT_CONTROLLER(click));
     gtk_stack_add_titled(GTK_STACK(u->stack),u->map,"treemap","Treemap"); gtk_paned_set_end_child(GTK_PANED(paned),u->stack);
+    GtkWidget *history_box=gtk_box_new(GTK_ORIENTATION_VERTICAL,6); button(history_box,"Capture snapshot after verification",G_CALLBACK(snapshot_clicked),u);
+    u->history_chart=gtk_drawing_area_new();gtk_widget_set_size_request(u->history_chart,-1,200);gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(u->history_chart),history_draw,u,NULL);gtk_box_append(GTK_BOX(history_box),u->history_chart);
+    u->history_text=gtk_text_view_new();gtk_text_view_set_editable(GTK_TEXT_VIEW(u->history_text),false);gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(u->history_text),GTK_WRAP_WORD_CHAR);
+    GtkWidget *history_scroll=gtk_scrolled_window_new();gtk_widget_set_vexpand(history_scroll,true);gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(history_scroll),u->history_text);gtk_box_append(GTK_BOX(history_box),history_scroll);gtk_stack_add_titled(GTK_STACK(u->stack),history_box,"history","History");
     GtkWidget *switcher = gtk_stack_switcher_new(); gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher),GTK_STACK(u->stack)); gtk_box_append(GTK_BOX(nav),switcher);
     const char *metrics[] = {"Logical", "Allocated", NULL}; u->metric = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(metrics)); gtk_drop_down_set_selected(u->metric,1);
     gtk_box_append(GTK_BOX(nav),GTK_WIDGET(u->metric)); g_signal_connect(u->metric,"notify::selected",G_CALLBACK(tab_changed),u);
@@ -518,18 +573,18 @@ static void ui_free(gpointer data)
 {
     Ui *u = data;
     for (guint i = 0; i < u->history->len; i++) free(g_array_index(u->history, Location, i).path);
-    map_clear(u); g_array_unref(u->tiles);
+    map_clear(u); g_array_unref(u->tiles); g_array_unref(u->snapshots);
     g_clear_object(&u->model); g_clear_object(&u->selection); g_array_unref(u->history);
     free(u->socket); free(u->path); g_free(u->pending); g_free(u);
 }
 int th_gui_run(int argc, char **argv)
 {
     Ui *u = g_new0(Ui, 1); u->socket = th_socket_path(); u->history = g_array_new(false, false, sizeof(Location));
-    u->tiles = g_array_new(false, false, sizeof(Tile));
+    u->tiles = g_array_new(false, false, sizeof(Tile)); u->snapshots = g_array_new(false,false,sizeof(Snapshot));
     u->smoke = g_getenv("TREEHOUND_GUI_SMOKE") != NULL;
     GtkApplication *app = gtk_application_new("io.github.blindicide.treehound", G_APPLICATION_NON_UNIQUE); u->app = app;
     g_object_set_data_full(G_OBJECT(app), "ui", u, ui_free); g_signal_connect(app, "activate", G_CALLBACK(activate), u);
-    int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 5)) result = 4;
+    int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 7)) result = 4;
     u->closing = true; if (u->retry_source) g_source_remove(u->retry_source); if (u->smoke_source) g_source_remove(u->smoke_source);
     g_object_unref(app); return result;
 }

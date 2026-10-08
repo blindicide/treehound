@@ -2,6 +2,7 @@
 #include "th_test.h"
 
 #include "treehound/db.h"
+#include "treehound/history.h"
 #include "treehound/util.h"
 
 #include <locale.h>
@@ -69,6 +70,30 @@ static void test_open_migrate(void)
     CHECK(db == NULL);
     th_sb_free(&err);
     free(p);
+}
+
+static void test_history_migration(void)
+{
+    char *p=db_path("history.sqlite3");th_strbuf err;th_sb_init(&err);sqlite3 *db=th_db_open(p,false,&err);REQUIRE(db);
+    int64_t root=th_db_root_ensure(db,"/history");int64_t top=ADD(db,root,0,"history","/history",TH_TYPE_DIR,0);
+    CHECK_INT(th_db_exec(db,"UPDATE roots SET entry_id=1,state=1; UPDATE entries SET agg_size=10,agg_alloc=4096"),0);
+    /* Recreate the genuine version-1 topology with indexed data and FTS. */
+    CHECK_INT(top,1);CHECK_INT(th_db_exec(db,"DROP TABLE snapshot_dirs; DROP TABLE snapshots; PRAGMA user_version=1"),0);th_db_close(db);
+    db=th_db_open(p,false,&err);REQUIRE(db);CHECK_INT(th_db_schema_version(db),2);CHECK_INT(th_db_entry_count(db),1);
+    CHECK_INT(th_history_capture(db,root,2,100000,true),0);
+    CHECK_INT(th_history_capture(db,root,2,100001,false),0);
+    CHECK_INT(th_db_exec(db,"UPDATE entries SET agg_size=25"),0);
+    CHECK_INT(th_history_capture(db,root,2,100002,true),0);
+    th_strbuf reply;th_sb_init(&reply);th_jw w;th_jw_init(&w,&reply);th_jw_obj_begin(&w);CHECK_INT(th_history_reply(db,root,&w),0);th_jw_obj_end(&w);
+    th_jval *json=th_json_parse(reply.data,reply.len,NULL);REQUIRE(json);CHECK_INT(th_json_get(json,"snapshots")->n,2);CHECK_INT(th_json_get_int(&th_json_get(json,"changes")->items[0],"size_delta",0),15);th_json_free(json);th_sb_free(&reply);
+    CHECK_INT(th_history_capture(db,root,2,200000,false),0);
+    sqlite3_stmt *q=th_db_prepare(db,"SELECT count(*),min(captured_at) FROM snapshots");REQUIRE(q);CHECK_INT(sqlite3_step(q),SQLITE_ROW);CHECK_INT(sqlite3_column_int(q,0),2);CHECK_INT(sqlite3_column_int64(q,1),100002);sqlite3_finalize(q);
+    CHECK_INT(th_db_root_set_state(db,root,TH_STATE_STALE,"test"),0);CHECK_INT(th_history_capture(db,root,2,300000,true),-1);
+    CHECK_INT(th_db_root_delete(db,root),0);q=th_db_prepare(db,"SELECT count(*) FROM snapshot_dirs");REQUIRE(q);CHECK_INT(sqlite3_step(q),SQLITE_ROW);CHECK_INT(sqlite3_column_int(q,0),0);sqlite3_finalize(q);
+    CHECK_INT(th_db_check(db,true,&err),0);
+    /* Conflicting migration fails transactionally without advancing version. */
+    CHECK_INT(th_db_meta_set(db,"keep","yes"),0);CHECK_INT(th_db_exec(db,"DROP TABLE snapshot_dirs; PRAGMA user_version=1"),0);CHECK_INT(th_db_migrate(db,&err),-1);CHECK_INT(th_db_schema_version(db),1);char *value=th_db_meta_get(db,"keep");CHECK_STR(value,"yes");free(value);
+    CHECK_INT(th_db_exec(db,"DROP TABLE snapshots"),0);CHECK_INT(th_db_migrate(db,&err),0);th_db_close(db);th_sb_free(&err);free(p);
 }
 
 static void test_entries(void)
@@ -202,6 +227,7 @@ int main(void)
     REQUIRE(mkdtemp(dbdir));
     RUN(test_open_migrate);
     RUN(test_entries);
+    RUN(test_history_migration);
     char cmd[128];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", dbdir);
     if (system(cmd) != 0)

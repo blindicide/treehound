@@ -44,7 +44,7 @@ all roots recover. Global recovery generations are consumed separately by each
 root, so an unrelated pending directory diff cannot hide lost events. Offline
 roots retain cached searchable entries with an Offline state. SIGKILL/restart
 reconciles offline edits and passes SQLite integrity checking. Special filesystem
-and mount namespace behavior still require dedicated validation. History and million-entry measurements follow in subsequent releases.
+and mount namespace behavior still require dedicated validation. Million-entry measurements follow in the reliability release.
 
 ## Command-line client
 
@@ -66,3 +66,14 @@ a directory changes the indexed scope; Back/Up and Explorer remain available
 for tiny or zero-size entries. Resize, scope changes and explicit refresh trigger
 redraw; there is no animation timer. Allocated sizes have the same compression,
 reflink and hard-link accounting caveats as the explorer.
+
+## History
+
+The monitor scan adapter captures successful verified reconciliations on the
+original scanner's sole writer thread. Explicit capture requests coalesce into
+a root flag and a normal full-scan job; automatic capture is eligible daily.
+Capture and retention run in one transaction. Readers use a consistent SQLite
+snapshot; the GTK History view receives bounded series and common-directory
+changes through its IPC worker. Cairo redraws on data, metric and size changes.
+The date/byte summary is also available as selectable text. Configuration controls
+per-root retention. No continuous history polling or UI-thread scan is added.

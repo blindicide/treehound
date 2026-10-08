@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-10-08
+
+- Transactional schema 1→2 migration preserves indexed entries and FTS.
+- Daily successful-reconciliation root snapshots plus explicit verified capture on the sole writer thread, with per-root bounded retention and cascading cleanup.
+- History chart and dated byte totals, growth/shrink summary and largest changes between common recorded directory paths. At most 1,024 directories per capture and 365 chart points; missing directory coverage is not treated as zero.
+- Real GTK capture/refresh, filesystem growth/retention, migration rollback and integrity tests.
+
 ## 0.3.1 — 2026-10-08
 
 - Initialize empty treemap weights for strict optimized GCC builds; v0.3.0 publication was blocked by this compiler diagnostic.

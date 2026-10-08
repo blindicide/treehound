@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
     fd = os.open(os.fsencode(root) + b"/bad\xff.txt", os.O_CREAT | os.O_WRONLY, 0o600)
     os.write(fd, b"x"); os.close(fd)
     cfg = base / "config"
-    cfg.write_text(f"root = {root}\nwatch = false\nreconcile_interval_hours = 0\n")
+    cfg.write_text(f"root = {root}\nwatch = false\nsnapshot_retention = 3\nreconcile_interval_hours = 0\n")
     sockpath = str(base / "run" / "daemon.sock")
     command = [sys.argv[1], "--config", str(cfg), "--database", str(base / "state" / "index.db"), "--socket", sockpath]
     def call(cmd, **kw):
@@ -48,6 +48,11 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
     try:
         assert os.stat(sockpath).st_mode & 0o777 == 0o600
         roots = call("roots")["roots"]
+        root_id = roots[0]["id"]
+        assert not call("history")["ok"] and not call("snapshot")["ok"]
+        initial_history = call("history", root_id=root_id)
+        assert initial_history["ok"] and len(initial_history["snapshots"]) == 1, initial_history
+        assert initial_history["snapshots"][0]["size"] == roots[0]["size"]
         assert roots[0]["files"] == 5, roots  # pathname count includes hardlinks and symlink
         r = call("search", query="hello")
         assert r["ok"] and r["used_index"] and len(r["items"]) == 1, r
@@ -89,6 +94,12 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         tree = call("treemap", parent_id=directory["id"], metric="logical")
         assert tree["children"] == 600 and len(tree["items"]) == 512 and tree["other_count"] == 88 and tree["other_weight"] == 88, tree
         assert tree["total_weight"] == 600
+        for i in range(4):
+            (bulk / "growing.dat").write_bytes(b"y"*(10+i))
+            seq = call("snapshot", root_id=root_id)["seq"]; assert wait_idle()["completed_seq"] >= seq
+        history = call("history", root_id=root_id)
+        assert len(history["snapshots"]) == 3 and history["snapshots"][-1]["size"]-history["snapshots"][-2]["size"] == 1, history
+        assert any(v["path"] == str(bulk) and v["size_delta"] == 1 for v in history["changes"]), history
         second = subprocess.run(command, capture_output=True, timeout=5)
         assert second.returncode == 3
     finally:

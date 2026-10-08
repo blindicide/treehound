@@ -4,6 +4,7 @@
 #include "daemon.h"
 int monitor_start(th_daemon *d);
 void monitor_stop(void);
+void monitor_snapshot(int64_t root_id);
 void monitor_force(int64_t root_id);
 bool monitor_enabled(void);
 bool monitor_pending(int64_t root_id);

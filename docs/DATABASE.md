@@ -1,6 +1,6 @@
 # Database
 
-SQLite schema revision 1 is authoritative in `include/treehound/db.h`.
+SQLite schema revision 2 is authoritative in `include/treehound/db.h`.
 `th_db_open` creates/migrates transactionally and rejects newer schema versions.
 The daemon enables WAL; GUI and CLI must use IPC, never open the database.
 
@@ -18,3 +18,21 @@ inode allocations from aggregates; file counts count pathnames. Directory
 logical/allocated totals include directory metadata. Sparse logical sizes can
 exceed allocated sizes. Allocated totals are not physical disk usage for
 compressed files, reflinks, snapshots, shared extents or filesystem metadata.
+
+Schema 1→2 adds `snapshots` (root, capture time, logical/allocated totals,
+file/directory counts) and `snapshot_dirs` (snapshot, raw-byte path, aggregates).
+The migration is a single transaction and preserves the entries and FTS tables.
+A migration failure leaves the old version and data intact. Newer schemas are
+rejected rather than downgraded.
+
+Snapshots are written only on the scanner thread after a complete, error-free
+reconciliation with no pending monitor work. Automatic captures occur no more
+than once per 24 hours; the GUI can explicitly request a full verified capture.
+Offline, stale and partially enumerated roots produce no fresh snapshot.
+`snapshot_retention` bounds per-root captures (default 30); cascading deletes
+remove directory records with expired snapshots or removed roots. Each capture
+retains at most the 1,024 largest logical-size directories, so change summaries
+compare only paths recorded in both captures. Renames, newly added/deleted
+paths and directories outside this coverage have no inferred directory delta.
+Root totals remain complete subject to the index's documented size semantics.
+IPC returns at most 365 ordered captures and 20 common-path changes.

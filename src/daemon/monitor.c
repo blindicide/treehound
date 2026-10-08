@@ -2,6 +2,7 @@
 #include "monitor.h"
 #include "treehound/common.h"
 #include "treehound/db.h"
+#include "treehound/history.h"
 #include "treehound/util.h"
 #include <errno.h>
 #include <poll.h>
@@ -15,7 +16,7 @@
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR | IN_DONT_FOLLOW)
 typedef struct { int wd; int64_t root; char *path; } watch;
 typedef struct { int64_t root; char *path; } dirty;
-typedef struct { int64_t root; uint64_t epoch; } coverage;
+typedef struct { int64_t root; uint64_t epoch; bool snapshot; } coverage;
 typedef struct { uint32_t cookie; int64_t root; char *from, *to; } move;
 static struct {
     pthread_mutex_t mu;
@@ -51,6 +52,18 @@ void monitor_force(int64_t root)
 {
     (void)root;
     pthread_mutex_lock(&m.mu); m.epoch++; pthread_mutex_unlock(&m.mu);
+}
+void monitor_snapshot(int64_t root)
+{
+    pthread_mutex_lock(&m.mu);
+    size_t i;
+    for (i=0; i<m.ncovered; i++) if (m.covered[i].root==root) break;
+    if (i==m.ncovered) {
+        m.covered=th_xrealloc(m.covered,(m.ncovered+1)*sizeof *m.covered);
+        m.covered[m.ncovered++]=(coverage){.root=root,.epoch=UINT64_MAX};
+    }
+    m.covered[i].snapshot=true; m.epoch++;
+    pthread_mutex_unlock(&m.mu);
 }
 static void queue_path(int64_t root, const char *path)
 {
@@ -234,7 +247,7 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     for (scope = 0; scope < m.ncovered; scope++) if (m.covered[scope].root == root) break;
     if (scope == m.ncovered) {
         m.covered = th_xrealloc(m.covered, (m.ncovered + 1) * sizeof *m.covered);
-        m.covered[m.ncovered++] = (coverage){root, UINT64_MAX};
+        m.covered[m.ncovered++] = (coverage){.root=root, .epoch=UINT64_MAX};
     }
     bool full = m.covered[scope].epoch != m.epoch;
     m.covered[scope].epoch = m.epoch;
@@ -276,5 +289,12 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     pthread_mutex_lock(&m.mu); bool failed = m.failed; pthread_mutex_unlock(&m.mu);
     if (rc == TH_SCAN_OK && (failed || stats->errors))
         th_db_root_set_state(db, root, TH_STATE_STALE, failed ? "inotify coverage incomplete" : "enumeration incomplete");
+    if (rc == TH_SCAN_OK && !failed && !stats->errors && !monitor_pending(root)) {
+        pthread_mutex_lock(&m.mu); bool capture = m.covered[scope].snapshot; m.covered[scope].snapshot = false; pthread_mutex_unlock(&m.mu);
+        if (th_history_capture(db,root,opts->cfg->snapshot_retention,th_now(),capture) != 0) {
+            th_log(TH_LOG_WARN,"snapshot failed for root %lld",(long long)root);
+            pthread_mutex_lock(&m.mu); m.covered[scope].snapshot |= capture; pthread_mutex_unlock(&m.mu);
+        }
+    }
     return rc;
 }
