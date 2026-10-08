@@ -1,0 +1,579 @@
+{
+  "head": "7d94a3fea40d70ed1b8d82c49189fd5cece17166",
+  "working_tree_dirty": true,
+  "binary_sha256": {
+    "treehoundd": "989ef295d164fa0b511dd4bc50f4b30c5bd6e806dd0c5003276a17b8d7584ada",
+    "treehound": "05b824216f0f49754954eecb5b3118a53dffc715b8f83f4752e011fdc2a59b1c"
+  },
+  "version": "treehoundd 0.5.1",
+  "count": 1000000,
+  "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+  "fixture_seconds": 18.58146829204634,
+  "filesystem": "ext2/ext3",
+  "cpu_count": 4,
+  "initial_scan": false,
+  "scan_seconds": 17.313996721000876,
+  "indexed_entries": 1001001,
+  "scan_peak_rss_bytes": 22609920,
+  "roots": [
+    {
+      "id": 1,
+      "entry_id": 1,
+      "path": "<fixture>/files",
+      "status": "verified",
+      "error": "",
+      "size": 66368480,
+      "allocated": 1295069184,
+      "files": 1000000,
+      "directories": 1000,
+      "last_verified": 1791500046
+    }
+  ],
+  "search_samples": [
+    {
+      "query": "5fe",
+      "length": 3,
+      "ms": 26.661415002308786,
+      "returned": 200,
+      "engine_ms": 24.2337
+    },
+    {
+      "query": "a80",
+      "length": 3,
+      "ms": 25.76455898815766,
+      "returned": 200,
+      "engine_ms": 23.1048
+    },
+    {
+      "query": "edb",
+      "length": 3,
+      "ms": 26.38442302122712,
+      "returned": 200,
+      "engine_ms": 22.9693
+    },
+    {
+      "query": "c35",
+      "length": 3,
+      "ms": 26.87425003387034,
+      "returned": 200,
+      "engine_ms": 23.7041
+    },
+    {
+      "query": "418",
+      "length": 3,
+      "ms": 38.16104703582823,
+      "returned": 200,
+      "engine_ms": 34.7252
+    },
+    {
+      "query": "b46",
+      "length": 3,
+      "ms": 27.062016015406698,
+      "returned": 200,
+      "engine_ms": 23.3099
+    },
+    {
+      "query": "385",
+      "length": 3,
+      "ms": 37.56239503854886,
+      "returned": 200,
+      "engine_ms": 34.2062
+    },
+    {
+      "query": "bd6",
+      "length": 3,
+      "ms": 28.661934018600732,
+      "returned": 200,
+      "engine_ms": 25.5744
+    },
+    {
+      "query": "412",
+      "length": 3,
+      "ms": 32.01932902447879,
+      "returned": 200,
+      "engine_ms": 29.4399
+    },
+    {
+      "query": "bcf",
+      "length": 3,
+      "ms": 23.0581839568913,
+      "returned": 200,
+      "engine_ms": 21.1342
+    },
+    {
+      "query": "7ff",
+      "length": 3,
+      "ms": 25.981940038036555,
+      "returned": 200,
+      "engine_ms": 22.928
+    },
+    {
+      "query": "4a0",
+      "length": 3,
+      "ms": 23.664659005589783,
+      "returned": 200,
+      "engine_ms": 21.1617
+    },
+    {
+      "query": "801",
+      "length": 3,
+      "ms": 40.77832598704845,
+      "returned": 200,
+      "engine_ms": 37.9184
+    },
+    {
+      "query": "aec",
+      "length": 3,
+      "ms": 24.475324025843292,
+      "returned": 200,
+      "engine_ms": 21.882
+    },
+    {
+      "query": "61f",
+      "length": 3,
+      "ms": 24.85675603384152,
+      "returned": 200,
+      "engine_ms": 21.7166
+    },
+    {
+      "query": "5f3",
+      "length": 3,
+      "ms": 27.055956015828997,
+      "returned": 200,
+      "engine_ms": 24.2447
+    },
+    {
+      "query": "4cb",
+      "length": 3,
+      "ms": 27.00917498441413,
+      "returned": 200,
+      "engine_ms": 24.136
+    },
+    {
+      "query": "9e1",
+      "length": 3,
+      "ms": 24.447391973808408,
+      "returned": 200,
+      "engine_ms": 21.6309
+    },
+    {
+      "query": "f96",
+      "length": 3,
+      "ms": 24.437094980385154,
+      "returned": 200,
+      "engine_ms": 21.6063
+    },
+    {
+      "query": "737",
+      "length": 3,
+      "ms": 38.39780803536996,
+      "returned": 200,
+      "engine_ms": 35.883
+    },
+    {
+      "query": "396",
+      "length": 3,
+      "ms": 33.6324879899621,
+      "returned": 200,
+      "engine_ms": 30.8472
+    },
+    {
+      "query": "654",
+      "length": 3,
+      "ms": 36.330087983515114,
+      "returned": 200,
+      "engine_ms": 33.9066
+    },
+    {
+      "query": "809",
+      "length": 3,
+      "ms": 36.37696895748377,
+      "returned": 200,
+      "engine_ms": 33.6799
+    },
+    {
+      "query": "eef",
+      "length": 3,
+      "ms": 25.035687955096364,
+      "returned": 200,
+      "engine_ms": 22.3602
+    },
+    {
+      "query": "09d",
+      "length": 3,
+      "ms": 28.28895498532802,
+      "returned": 200,
+      "engine_ms": 25.0865
+    },
+    {
+      "query": "0f2",
+      "length": 3,
+      "ms": 24.213295022491366,
+      "returned": 200,
+      "engine_ms": 21.4006
+    },
+    {
+      "query": "433",
+      "length": 3,
+      "ms": 34.44885101635009,
+      "returned": 200,
+      "engine_ms": 31.7035
+    },
+    {
+      "query": "0e4",
+      "length": 3,
+      "ms": 24.02917400468141,
+      "returned": 200,
+      "engine_ms": 21.8512
+    },
+    {
+      "query": "18c",
+      "length": 3,
+      "ms": 24.421352019999176,
+      "returned": 200,
+      "engine_ms": 22.2653
+    },
+    {
+      "query": "c22",
+      "length": 3,
+      "ms": 24.5262699900195,
+      "returned": 200,
+      "engine_ms": 22.0136
+    },
+    {
+      "query": "5feceb",
+      "length": 6,
+      "ms": 2.143125981092453,
+      "returned": 1,
+      "engine_ms": 1.5778
+    },
+    {
+      "query": "a8054e",
+      "length": 6,
+      "ms": 2.6071129832416773,
+      "returned": 2,
+      "engine_ms": 2.04554
+    },
+    {
+      "query": "edbc46",
+      "length": 6,
+      "ms": 2.21934198634699,
+      "returned": 2,
+      "engine_ms": 1.67814
+    },
+    {
+      "query": "c359ff",
+      "length": 6,
+      "ms": 2.6367069804109633,
+      "returned": 2,
+      "engine_ms": 2.0981
+    },
+    {
+      "query": "418db3",
+      "length": 6,
+      "ms": 2.393646980635822,
+      "returned": 2,
+      "engine_ms": 1.84391
+    },
+    {
+      "query": "b46418",
+      "length": 6,
+      "ms": 2.6474330225028098,
+      "returned": 1,
+      "engine_ms": 2.15512
+    },
+    {
+      "query": "3857d5",
+      "length": 6,
+      "ms": 2.374958014115691,
+      "returned": 2,
+      "engine_ms": 1.8174
+    },
+    {
+      "query": "bd61fb",
+      "length": 6,
+      "ms": 2.032357035204768,
+      "returned": 1,
+      "engine_ms": 1.53141
+    },
+    {
+      "query": "412d91",
+      "length": 6,
+      "ms": 2.117945987265557,
+      "returned": 1,
+      "engine_ms": 1.68051
+    },
+    {
+      "query": "bcfd94",
+      "length": 6,
+      "ms": 1.8320619710721076,
+      "returned": 1,
+      "engine_ms": 1.38578
+    },
+    {
+      "query": "7fffd9",
+      "length": 6,
+      "ms": 1.8073729588650167,
+      "returned": 3,
+      "engine_ms": 1.34423
+    },
+    {
+      "query": "4a0da5",
+      "length": 6,
+      "ms": 2.0004480029456317,
+      "returned": 2,
+      "engine_ms": 1.53486
+    },
+    {
+      "query": "801432",
+      "length": 6,
+      "ms": 2.7653430006466806,
+      "returned": 4,
+      "engine_ms": 2.27214
+    },
+    {
+      "query": "aecd3f",
+      "length": 6,
+      "ms": 2.1227240213193,
+      "returned": 2,
+      "engine_ms": 1.48785
+    },
+    {
+      "query": "61f166",
+      "length": 6,
+      "ms": 2.218229987192899,
+      "returned": 1,
+      "engine_ms": 1.66325
+    },
+    {
+      "query": "5f3c37",
+      "length": 6,
+      "ms": 2.2478540195152164,
+      "returned": 2,
+      "engine_ms": 1.71049
+    },
+    {
+      "query": "4cb432",
+      "length": 6,
+      "ms": 2.1157230366952717,
+      "returned": 4,
+      "engine_ms": 1.5847
+    },
+    {
+      "query": "9e1dbc",
+      "length": 6,
+      "ms": 2.23204999929294,
+      "returned": 1,
+      "engine_ms": 1.71119
+    },
+    {
+      "query": "f96fe9",
+      "length": 6,
+      "ms": 2.0108339958824217,
+      "returned": 1,
+      "engine_ms": 1.50775
+    },
+    {
+      "query": "737389",
+      "length": 6,
+      "ms": 3.2020999933592975,
+      "returned": 2,
+      "engine_ms": 2.60119
+    },
+    {
+      "query": "3965ab",
+      "length": 6,
+      "ms": 2.7997069992125034,
+      "returned": 1,
+      "engine_ms": 2.12939
+    },
+    {
+      "query": "65446b",
+      "length": 6,
+      "ms": 2.4941699812188745,
+      "returned": 1,
+      "engine_ms": 1.87458
+    },
+    {
+      "query": "809d6c",
+      "length": 6,
+      "ms": 2.583766996394843,
+      "returned": 1,
+      "engine_ms": 1.98099
+    },
+    {
+      "query": "eefb01",
+      "length": 6,
+      "ms": 2.128452993929386,
+      "returned": 2,
+      "engine_ms": 1.49257
+    },
+    {
+      "query": "09df48",
+      "length": 6,
+      "ms": 2.3832410224713385,
+      "returned": 1,
+      "engine_ms": 1.6962
+    },
+    {
+      "query": "0f2b6c",
+      "length": 6,
+      "ms": 1.9720849813893437,
+      "returned": 1,
+      "engine_ms": 1.484
+    },
+    {
+      "query": "43303b",
+      "length": 6,
+      "ms": 3.042285970877856,
+      "returned": 1,
+      "engine_ms": 2.38599
+    },
+    {
+      "query": "0e4909",
+      "length": 6,
+      "ms": 2.765634038951248,
+      "returned": 1,
+      "engine_ms": 2.32361
+    },
+    {
+      "query": "18cc0a",
+      "length": 6,
+      "ms": 1.9619289669208229,
+      "returned": 1,
+      "engine_ms": 1.5081
+    },
+    {
+      "query": "c22d97",
+      "length": 6,
+      "ms": 1.7547429888509214,
+      "returned": 1,
+      "engine_ms": 1.29506
+    }
+  ],
+  "search_p95_ms_by_length": {
+    "3": 38.39780803536996,
+    "6": 3.042285970877856
+  },
+  "broad_searches": [
+    {
+      "query": "item",
+      "ms": 3.870277025271207,
+      "ok": true,
+      "error": null,
+      "returned": 200
+    },
+    {
+      "query": "dat",
+      "ms": 3.458058985415846,
+      "ok": true,
+      "error": null,
+      "returned": 200
+    },
+    {
+      "query": "it",
+      "ms": 2.7301309746690094,
+      "ok": true,
+      "error": null,
+      "returned": 200
+    }
+  ],
+  "pagination_samples": [
+    {
+      "offset": 0,
+      "returned": 200,
+      "ms": 3.3063290175050497,
+      "ok": true,
+      "error": null
+    },
+    {
+      "offset": 200,
+      "returned": 200,
+      "ms": 3.4941540216095746,
+      "ok": true,
+      "error": null
+    },
+    {
+      "offset": 400,
+      "returned": 200,
+      "ms": 4.252800950780511,
+      "ok": true,
+      "error": null
+    },
+    {
+      "offset": 10000,
+      "returned": 200,
+      "ms": 10.361026972532272,
+      "ok": true,
+      "error": null
+    }
+  ],
+  "idle_window_seconds": 10.000107376021333,
+  "idle_cpu_seconds": 0.0,
+  "idle_memory": {
+    "VmHWM": 34246656,
+    "VmRSS": 22581248
+  },
+  "database_bytes": 679841792,
+  "database_files_bytes": {
+    "main": 679841792,
+    "-wal": 12392,
+    "-shm": 32768
+  },
+  "database_storage_bytes": 679886952,
+  "gui_samples": [
+    {
+      "window_mapped_ms": 288.019,
+      "indexed_listing_ms": 624.224,
+      "process_with_xvfb_ms": 837.2387150302529
+    },
+    {
+      "window_mapped_ms": 272.08,
+      "indexed_listing_ms": 605.596,
+      "process_with_xvfb_ms": 815.8526389743201
+    },
+    {
+      "window_mapped_ms": 292.409,
+      "indexed_listing_ms": 611.699,
+      "process_with_xvfb_ms": 795.276687014848
+    },
+    {
+      "window_mapped_ms": 259.033,
+      "indexed_listing_ms": 528.161,
+      "process_with_xvfb_ms": 702.7460220269859
+    },
+    {
+      "window_mapped_ms": 256.213,
+      "indexed_listing_ms": 554.229,
+      "process_with_xvfb_ms": 741.0758790210821
+    },
+    {
+      "window_mapped_ms": 272.72,
+      "indexed_listing_ms": 560.811,
+      "process_with_xvfb_ms": 740.9893780131824
+    },
+    {
+      "window_mapped_ms": 267.177,
+      "indexed_listing_ms": 548.577,
+      "process_with_xvfb_ms": 727.4800330051221
+    },
+    {
+      "window_mapped_ms": 312.95,
+      "indexed_listing_ms": 629.506,
+      "process_with_xvfb_ms": 822.401172015816
+    },
+    {
+      "window_mapped_ms": 269.111,
+      "indexed_listing_ms": 531.172,
+      "process_with_xvfb_ms": 717.2284339903854
+    },
+    {
+      "window_mapped_ms": 279.961,
+      "indexed_listing_ms": 557.775,
+      "process_with_xvfb_ms": 751.1218900326639
+    }
+  ],
+  "gui_indexed_listing_p95_ms": 629.506,
+  "measured_at_utc": "2026-10-08T22:54:26Z",
+  "measurement_note": "Existing index reconciled at startup, not a fresh scan. Harness reporting edits were dirty at launch; runtime release code unchanged. All prior reports retained. Public root path normalized; numerical measurements unchanged."
+}

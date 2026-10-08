@@ -120,3 +120,9 @@ change these sizes afterward. A real 1,000-file run measured 4,096 main-file
 bytes plus 869,352 WAL and 32,768 shared-memory bytes (906,216 total). The harness
 refuses an existing success/failure report name before scanning, preserving
 prior evidence. These reporting changes do not alter the release binaries.
+
+A [separate cached million-index run](benchmarks/v0.5.1-cached-storage.json)
+verified 1,001,001 entries after startup reconciliation in 17.314s (not a fresh
+scan). Live storage was 679,841,792 main-file bytes, 12,392 WAL bytes and 32,768
+shared-memory bytes, totaling 679,886,952 bytes. Offset 10,000 returned 200
+matching rows in 10.361ms. This run supplements the fresh-scan report above.
