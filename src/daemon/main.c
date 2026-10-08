@@ -106,10 +106,9 @@ int main(int argc, char **argv)
         th_config_load(&d.cfg, d.config_path, &err) != 0) {
         fprintf(stderr, "initialization failed: %s (%s)\n", err.data ? err.data : "", strerror(errno)); return early_exit(&d, &err, sigfd, -1, TH_EXIT_FAILED);
     }
-    char *lockpath = th_xmalloc(strlen(d.db_path) + 6);
-    sprintf(lockpath, "%s.lock", d.db_path);
-    int lockfd = open(lockpath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
-    free(lockpath);
+    th_strbuf lockpath; th_sb_init(&lockpath); th_sb_printf(&lockpath, "%s.lock", d.db_path);
+    int lockfd = open(lockpath.data, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+    th_sb_free(&lockpath);
     if (lockfd < 0 || flock(lockfd, LOCK_EX | LOCK_NB) != 0) { fputs("database is already locked\n", stderr); return early_exit(&d, &err, sigfd, lockfd, TH_EXIT_UNAVAILABLE); }
     d.wdb = th_db_open(d.db_path, false, &err);
     if (!d.wdb) { fprintf(stderr, "%s\n", err.data); return early_exit(&d, &err, sigfd, lockfd, TH_EXIT_FAILED); }
