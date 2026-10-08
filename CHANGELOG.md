@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Enumeration gaps remain Stale across unrelated successful edits. Only a complete full verification clears them; real permission-denial/recovery coverage retains cached records and prevents false certification.
+
 - Coalesced bursts deduplicate shared ancestor aggregation; subtree and hard-link repair queries use bounded path/inode plans. Real 20,000-directory, 1,000-change measurement improved convergence from 16.95s to 0.836s, with verified root totals; raw runs retained in `docs/benchmarks/v0.5-watch-burst.json`.
 
 - Watch-registration failures are scoped to the affected root. A full verification retries coverage and clears a transient failure; a test-only linker wrapper verifies ENOSPC isolation and real live-update recovery without changing system limits.

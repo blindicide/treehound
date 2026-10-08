@@ -16,7 +16,7 @@
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR | IN_DONT_FOLLOW)
 typedef struct { int wd; int64_t root; char *path; uint64_t scan; } watch;
 typedef struct { int64_t root; char *path; } dirty;
-typedef struct { int64_t root; uint64_t epoch; bool snapshot, forced, failed; } coverage;
+typedef struct { int64_t root; uint64_t epoch; bool snapshot, forced, failed, incomplete; } coverage;
 typedef struct { uint32_t cookie; int64_t root; char *from, *to; } move;
 static struct {
     pthread_mutex_t mu;
@@ -42,10 +42,10 @@ bool monitor_pending(int64_t root)
     bool result = m.full || m.failed;
     if (root) {
         bool found = false;
-        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].failed || m.covered[i].forced || m.covered[i].epoch != m.epoch; }
+        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].failed || m.covered[i].incomplete || m.covered[i].forced || m.covered[i].epoch != m.epoch; }
         result |= !found;
     }
-    if (!root) for (size_t i = 0; i < m.ncovered; i++) result |= m.covered[i].failed;
+    if (!root) for (size_t i = 0; i < m.ncovered; i++) result |= m.covered[i].failed || m.covered[i].incomplete;
     for (size_t i = 0; i < m.npaths && !result; i++) result = !root || m.paths[i].root == root;
     pthread_mutex_unlock(&m.mu);
     return result;
@@ -394,11 +394,15 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     for (size_t i = 0; i < nw; i++) free(work[i].path);
     pthread_mutex_lock(&m.mu);
     if (enumerate && (rc != TH_SCAN_OK || stats->errors)) m.covered[scope].failed |= previous_failure;
+    /* Unrelated incremental success cannot close an enumeration gap. */
+    if (rc != TH_SCAN_OK || stats->errors) m.covered[scope].incomplete = true;
+    else if (enumerate) m.covered[scope].incomplete = false;
+    bool incomplete = m.covered[scope].incomplete;
     bool failed = m.failed || m.covered[scope].failed;
     pthread_mutex_unlock(&m.mu);
-    if (rc == TH_SCAN_OK && (failed || stats->errors))
+    if (rc == TH_SCAN_OK && (failed || incomplete))
         th_db_root_set_state(db, root, TH_STATE_STALE, failed ? "inotify coverage incomplete" : "enumeration incomplete");
-    if (rc == TH_SCAN_OK && !failed && !stats->errors && !monitor_pending(root)) {
+    if (rc == TH_SCAN_OK && !failed && !incomplete && !monitor_pending(root)) {
         pthread_mutex_lock(&m.mu); bool capture = m.covered[scope].snapshot; m.covered[scope].snapshot = false; pthread_mutex_unlock(&m.mu);
         if (th_history_capture(db,root,opts->cfg->snapshot_retention,th_now(),capture) != 0) {
             th_log(TH_LOG_WARN,"snapshot failed for root %lld",(long long)root);

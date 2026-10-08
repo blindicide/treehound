@@ -352,10 +352,10 @@ static void test_denied(void)
     REQUIRE(get(db, "t3/locked", &e) == 1);
     CHECK(e.flags & TH_FLAG_DENIED);
     th_entry_clear(&e);
-    CHECK(!exists(db, "t3/locked/secret"));
+    CHECK(exists(db, "t3/locked/secret"));
     CHECK(exists(db, "t3/ok"));
 
-    /* readable again: flag clears and children return */
+    /* readable again: flag clears and cached children reconcile */
     REQUIRE(chmod(lk, 0755) == 0);
     CHECK_INT(scan(db, rid, NULL, NULL), TH_SCAN_OK);
     REQUIRE(get(db, "t3/locked", &e) == 1);

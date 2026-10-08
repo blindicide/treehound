@@ -688,7 +688,8 @@ static int scan_one_dir(scan_ctx *c, const work_item *w)
         c->st->errors++;
         if (set_flags(c, w->id, entry_flags(c, w->id) | TH_FLAG_DENIED) != 0)
             return -1;
-        return delete_below(c, w->path, w->len);
+        /* A failed enumeration proves no absence: keep cached descendants. */
+        return 0;
     }
     struct stat ds;
     if (fstat(fd, &ds) != 0) {

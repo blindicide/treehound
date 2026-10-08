@@ -246,6 +246,22 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
             assert time.monotonic() < deadline, "overflow did not reconcile the other root"
             time.sleep(.02)
         wait_idle()
+        # A successful edit elsewhere cannot certify an unreadable subtree.
+        denied = root / "permission-gap"; denied.mkdir()
+        hidden = denied / "hidden-marker.txt"; hidden.write_bytes(b"cached")
+        assert call("verify", root_id=root_id)["ok"]; wait_idle()
+        denied.chmod(0)
+        try:
+            assert call("verify", root_id=root_id)["ok"]; wait_idle()
+            assert next(r for r in call("roots")["roots"] if r["id"] == root_id)["status"] == "stale"
+            (root / "healthy-edit.txt").write_bytes(b"healthy")
+            eventually("healthy-edit.txt", 1); wait_idle()
+            assert next(r for r in call("roots")["roots"] if r["id"] == root_id)["status"] == "stale", "unreadable subtree was falsely verified"
+            assert call("search", query="hidden-marker")["items"], "cached inaccessible record lost"
+        finally:
+            denied.chmod(0o700)
+        assert call("verify", root_id=root_id)["ok"]; wait_idle()
+        assert next(r for r in call("roots")["roots"] if r["id"] == root_id)["status"] == "verified"
         saved=call("config_save",config=f"root = {root}\nwatch = true\nreconcile_interval_hours = 0\n")
         assert saved["ok"];wait_idle()
         completed=call("status")["completed_seq"]
