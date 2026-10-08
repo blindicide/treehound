@@ -2,9 +2,9 @@
 
 Native Linux disk-usage browsing and indexed filename/path search, written in C17 with GTK4 and SQLite FTS5. MIT licensed.
 
-**v0.5 reliability and performance:** persistent indexing, asynchronous GTK explorer/search, CLI and live inotify updates. Native DEB/RPM install, reinstall, GUI/CLI smoke and removal gates have passed in Debian 13 and Fedora 44. Interactive treemap uses indexed logical/allocated sizes, tooltips and directory navigation. History provides daily snapshots, explicit verified capture, a size chart and directory change summaries. The reliability release adds bounded broad-query pagination, faster immediate-child browsing, root/watch lifecycle repairs and persistent bookmarks. [Measured performance and filesystem coverage](docs/PERFORMANCE.md).
+**v0.5.1 reliability and performance:** persistent indexing, asynchronous GTK explorer/search, CLI and live inotify updates. Native DEB/RPM install, reinstall, GUI/CLI smoke and removal gates have passed in Debian 13 and Fedora 44. Interactive treemap uses indexed logical/allocated sizes, tooltips and directory navigation. History provides daily snapshots, explicit verified capture, a size chart and directory change summaries. The reliability release adds bounded broad-query pagination, faster immediate-child browsing, root/watch lifecycle repairs and persistent bookmarks. The patch release preserves move identities and inaccessible caches, isolates incomplete watch coverage, bounds IPC waits and burst aggregation, and fixes Unicode searches and queued GUI actions. [Measured performance and filesystem coverage](docs/PERFORMANCE.md).
 
-[Latest release](https://github.com/blindicide/treehound/releases/latest) · [DEB](https://github.com/blindicide/treehound/releases/latest/download/treehound_0.5.0_amd64.deb) · [RPM](https://github.com/blindicide/treehound/releases/latest/download/treehound-0.5.0-1.x86_64.rpm)
+[Latest release](https://github.com/blindicide/treehound/releases/latest) · [DEB](https://github.com/blindicide/treehound/releases/latest/download/treehound_0.5.1_amd64.deb) · [RPM](https://github.com/blindicide/treehound/releases/latest/download/treehound-0.5.1-1.x86_64.rpm)
 
 ![Actual GTK indexed explorer under Xvfb](docs/screenshots/explorer.png)
 

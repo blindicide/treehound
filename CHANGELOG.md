@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 — 2026-10-09
 
 - GUI verification, settings saves and snapshot actions retain submission order in a bounded queue while read requests coalesce. Rapid snapshot clicks followed by a refresh no longer silently discard accepted actions; the actual GTK smoke test checks all three captures.
 
