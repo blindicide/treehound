@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- GUI verification, settings saves and snapshot actions retain submission order in a bounded queue while read requests coalesce. Rapid snapshot clicks followed by a refresh no longer silently discard accepted actions; the actual GTK smoke test checks all three captures.
+
 - The daemon initializes UTF-8 character folding before worker threads, fixing non-ASCII case-insensitive searches in service environments using the C locale. Actual IPC tests cover trigram, short-query fallback and case-sensitive behavior.
 
 - A metadata or directory-read I/O failure retains cached children instead of interpreting partial enumeration as deletion. A syscall-injected restart/recovery regression runs without privileges; permission-denial checks explicitly skip privileged package-test UIDs.

@@ -30,6 +30,7 @@ typedef struct {
     guint generation, pending_kind, smoke_stage, retry_source, smoke_source;
     bool busy, closing, smoke, smoke_failed, benchmark, mounts_loaded;
     GPtrArray *saved_paths;
+    GQueue *actions;
     double launched, mapped;
     GArray *history;
 } Ui;
@@ -37,6 +38,8 @@ typedef struct { char *request, *socket; guint generation, kind; bool start; } W
 static void query(Ui *u);
 static void show_settings(Ui *u, const char *text);
 static void submit(Ui *u, char *request, guint kind);
+static void start_work(Ui *u, Work *w);
+static bool mutation(guint kind) { return kind == 3 || kind == 5 || kind == 9; }
 static void preferences(Ui *u, bool save);
 static void path_clicked(GtkButton *button, gpointer data)
 {
@@ -306,8 +309,7 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
 {
     (void)source; Ui *u = data; GTask *task = G_TASK(result); Work *w = g_task_get_task_data(task);
     GError *error = NULL; th_jval *res = g_task_propagate_pointer(task, &error);
-    u->busy = false;
-    if (!u->closing && w->generation == u->generation) {
+    if (!u->closing && (mutation(w->kind) || w->generation == u->generation)) {
         if (!res || !th_json_get_bool(res, "ok", false)) {
             gtk_label_set_text(GTK_LABEL(u->status), error ? error->message : th_json_get_str(res, "error", "Request failed"));
             if (u->smoke) u->smoke_failed = true;
@@ -367,8 +369,8 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
             else if (u->smoke && u->smoke_stage == 4) { u->smoke_stage = 5; if (!u->tiles->len) u->smoke_failed = true; gtk_stack_set_visible_child_name(GTK_STACK(u->stack),"history"); }
         } else if (w->kind == 8) {
             history_populate(u,res);
-            if(u->smoke && u->smoke_stage==5) { if(!u->snapshots->len)u->smoke_failed=true;u->smoke_stage=6; snapshot_clicked(NULL,u); }
-            else if(u->smoke && u->smoke_stage==6) { if(u->snapshots->len<2)u->smoke_failed=true;u->smoke_stage=7;g_application_quit(G_APPLICATION(u->app)); }
+            if(u->smoke && u->smoke_stage==5) { if(!u->snapshots->len)u->smoke_failed=true;u->smoke_stage=6; snapshot_clicked(NULL,u); snapshot_clicked(NULL,u); snapshot_clicked(NULL,u); query(u); }
+            else if(u->smoke && u->smoke_stage==6) { if(u->snapshots->len<4)u->smoke_failed=true;u->smoke_stage=7;g_application_quit(G_APPLICATION(u->app)); }
         } else if (w->kind == 9) { query(u);
         } else if (w->kind == 6) {
             const th_jval *items = th_json_get(res, "items");
@@ -383,17 +385,35 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
         } else { gtk_label_set_text(GTK_LABEL(u->status), "Verification queued; refresh to view progress."); }
     }
     th_json_free(res); g_clear_error(&error);
-    if (u->pending && !u->closing) {
-        char *pending = u->pending; guint kind = u->pending_kind; u->pending = NULL;
-        submit(u, pending, kind);
+    u->busy = false;
+    if (!u->closing && !g_queue_is_empty(u->actions)) {
+        start_work(u, g_queue_pop_head(u->actions));
+    } else if (u->pending && !u->closing) {
+        Work *next = g_new0(Work, 1);
+        next->request = u->pending; next->kind = u->pending_kind;
+        next->generation = u->generation; u->pending = NULL;
+        start_work(u, next);
     }
 }
 static void submit(Ui *u, char *request, guint kind)
 {
-    u->generation++;
-    if (u->busy) { g_free(u->pending); u->pending = request; u->pending_kind = kind; return; }
-    Work *w = g_new0(Work, 1); w->request = request; w->socket = g_strdup(u->socket);
-    w->generation = u->generation; w->kind = kind; w->start = kind == 1;
+    if (u->closing) { g_free(request); return; }
+    if (!mutation(kind)) u->generation++;
+    if (u->busy && !mutation(kind)) {
+        g_free(u->pending); u->pending = request; u->pending_kind = kind; return;
+    }
+    if (u->busy && g_queue_get_length(u->actions) >= 64) {
+        gtk_label_set_text(GTK_LABEL(u->status), "Action queue full; wait before retrying.");
+        g_free(request); return;
+    }
+    Work *w = g_new0(Work, 1); w->request = request;
+    w->generation = u->generation; w->kind = kind;
+    if (u->busy) g_queue_push_tail(u->actions, w);
+    else start_work(u, w);
+}
+static void start_work(Ui *u, Work *w)
+{
+    w->socket = g_strdup(u->socket); w->start = w->kind == 1;
     GTask *task = g_task_new(u->app, NULL, received, u); g_task_set_task_data(task, w, work_free);
     u->busy = true; gtk_label_set_text(GTK_LABEL(u->status), "Loading indexed data…");
     g_task_run_in_thread(task, worker); g_object_unref(task);
@@ -655,12 +675,13 @@ static void ui_free(gpointer data)
     for (guint i = 0; i < u->history->len; i++) free(g_array_index(u->history, Location, i).path);
     map_clear(u); g_array_unref(u->tiles); g_array_unref(u->snapshots);
     g_clear_object(&u->model); g_clear_object(&u->selection); g_array_unref(u->history);
+    g_queue_free_full(u->actions, work_free);
     g_ptr_array_unref(u->saved_paths);free(u->socket); free(u->path); g_free(u->pending); g_free(u);
 }
 int th_gui_run(int argc, char **argv)
 {
     Ui *u = g_new0(Ui, 1); u->socket = th_socket_path(); u->history = g_array_new(false, false, sizeof(Location));
-    u->saved_paths=g_ptr_array_new_with_free_func(g_free);
+    u->saved_paths=g_ptr_array_new_with_free_func(g_free); u->actions=g_queue_new();
     u->tiles = g_array_new(false, false, sizeof(Tile)); u->snapshots = g_array_new(false,false,sizeof(Snapshot));
     u->smoke = g_getenv("TREEHOUND_GUI_SMOKE") != NULL;
     u->benchmark = g_getenv("TREEHOUND_GUI_BENCHMARK") != NULL; u->launched=th_mono_sec();
