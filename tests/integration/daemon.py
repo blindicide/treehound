@@ -124,6 +124,14 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         assert saved["ok"] and not saved["restart_required"]
         wait_idle()
         assert call("search", query="offline")["items"]
+        # A root-specific capture must not leave an unrelated root Updating.
+        live_roots = call("roots")["roots"]
+        seq = call("snapshot", root_id=live_roots[0]["id"])["seq"]
+        assert wait_idle()["completed_seq"] >= seq
+        assert all(r["status"] == "verified" for r in call("roots")["roots"])
+        seq = call("verify", root_id=live_roots[1]["id"])["seq"]
+        assert wait_idle()["completed_seq"] >= seq
+        assert all(r["status"] == "verified" for r in call("roots")["roots"])
         (root / "live.txt").write_bytes(b"live")
         assert eventually("live.txt", 1)[0]["size"] == 4
         (root / "live.txt").write_bytes(b"longer live data")
@@ -134,6 +142,7 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         (root / "newdir").mkdir()
         (root / "newdir" / "nested.txt").write_bytes(b"nested")
         nested_id = eventually("nested.txt", 1)[0]["id"]
+        wait_idle()  # Finish creation reconciliation before testing the paired move.
         (root / "newdir").rename(root / "moved")
         assert eventually(str(root / "moved" / "nested.txt"), 1)[0]["id"] == nested_id
         (root / "moved" / "nested.txt").unlink()
@@ -161,6 +170,15 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
             assert time.monotonic() < deadline, "overflow did not reconcile the other root"
             time.sleep(.02)
         wait_idle()
+        saved=call("config_save",config=f"root = {root}\nwatch = true\nreconcile_interval_hours = 0\n")
+        assert saved["ok"];wait_idle()
+        completed=call("status")["completed_seq"]
+        (other / "deep" / "overflow-marker.txt").write_bytes(b"removed root must no longer enqueue scans")
+        time.sleep(.2)
+        assert call("status")["completed_seq"]==completed
+        saved=call("config_save",config=f"root = {root}\nroot = {other}\nwatch = true\nreconcile_interval_hours = 0\n")
+        assert saved["ok"];wait_idle()
+        assert call("search",query="overflow-marker.txt")["items"][0]["size"]==41
     finally:
         proc.terminate(); assert proc.wait(timeout=5) == 0
     # An inaccessible root keeps its cached records with an honest Offline state.

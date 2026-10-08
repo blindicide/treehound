@@ -16,7 +16,7 @@
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR | IN_DONT_FOLLOW)
 typedef struct { int wd; int64_t root; char *path; } watch;
 typedef struct { int64_t root; char *path; } dirty;
-typedef struct { int64_t root; uint64_t epoch; bool snapshot; } coverage;
+typedef struct { int64_t root; uint64_t epoch; bool snapshot, forced; } coverage;
 typedef struct { uint32_t cookie; int64_t root; char *from, *to; } move;
 static struct {
     pthread_mutex_t mu;
@@ -25,6 +25,7 @@ static struct {
     pthread_t thread;
     bool running, failed, full;
     uint64_t epoch;
+    int64_t reconciled;
     coverage *covered; size_t ncovered;
     watch *watches;
     size_t nwatches, capacity;
@@ -41,29 +42,56 @@ bool monitor_pending(int64_t root)
     bool result = m.full || m.failed;
     if (root) {
         bool found = false;
-        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].epoch != m.epoch; }
+        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].forced || m.covered[i].epoch != m.epoch; }
         result |= !found;
     }
     for (size_t i = 0; i < m.npaths && !result; i++) result = !root || m.paths[i].root == root;
     pthread_mutex_unlock(&m.mu);
     return result;
 }
-void monitor_force(int64_t root)
+/* Requires m.mu; root identifiers remain stable while configured. */
+static size_t root_scope(int64_t root)
 {
-    (void)root;
-    pthread_mutex_lock(&m.mu); m.epoch++; pthread_mutex_unlock(&m.mu);
-}
-void monitor_snapshot(int64_t root)
-{
-    pthread_mutex_lock(&m.mu);
     size_t i;
     for (i=0; i<m.ncovered; i++) if (m.covered[i].root==root) break;
     if (i==m.ncovered) {
         m.covered=th_xrealloc(m.covered,(m.ncovered+1)*sizeof *m.covered);
         m.covered[m.ncovered++]=(coverage){.root=root,.epoch=UINT64_MAX};
     }
-    m.covered[i].snapshot=true; m.epoch++;
+    return i;
+}
+void monitor_force(int64_t root)
+{
+    pthread_mutex_lock(&m.mu);
+    if (root) { size_t i=root_scope(root); m.covered[i].forced=true; }
+    else m.epoch++;
     pthread_mutex_unlock(&m.mu);
+}
+void monitor_snapshot(int64_t root)
+{
+    pthread_mutex_lock(&m.mu);
+    size_t i=root_scope(root); m.covered[i].snapshot=true; m.covered[i].forced=true;
+    pthread_mutex_unlock(&m.mu);
+}
+/* Sole writer calls this after deleting a configured root. Release kernel
+ * resources and cached scopes before an identifier can be reused. */
+void monitor_forget(int64_t root)
+{
+    pthread_mutex_lock(&m.mu);
+    size_t keep=0;
+    for(size_t i=0;i<m.nwatches;i++) {
+        if(m.watches[i].root==root) { if(m.running)inotify_rm_watch(m.fd,m.watches[i].wd);free(m.watches[i].path); }
+        else m.watches[keep++]=m.watches[i];
+    }
+    m.nwatches=keep;keep=0;
+    for(size_t i=0;i<m.ncovered;i++)if(m.covered[i].root!=root)m.covered[keep++]=m.covered[i];
+    m.ncovered=keep;keep=0;
+    for(size_t i=0;i<m.npaths;i++) { if(m.paths[i].root==root)free(m.paths[i].path);else m.paths[keep++]=m.paths[i]; }
+    m.npaths=keep;keep=0;
+    for(size_t i=0;i<m.nmoves;i++) { if(m.moves[i].root==root) { free(m.moves[i].from);free(m.moves[i].to); }else m.moves[keep++]=m.moves[i]; }
+    m.nmoves=keep;
+    pthread_mutex_unlock(&m.mu);
+    if(m.d)daemon_cancel_root(m.d,root);
 }
 static void queue_path(int64_t root, const char *path)
 {
@@ -242,15 +270,14 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
 {
     dirty work[MAX_DIRTY]; size_t nw = 0;
     move moves[256]; size_t nm = 0;
+    /* The preserved scanner advances this timestamp when scheduling its
+     * periodic safety net. Consume that generation separately for every root. */
+    pthread_mutex_lock(&m.d->mu); int64_t reconciled=m.d->last_reconcile; pthread_mutex_unlock(&m.d->mu);
     pthread_mutex_lock(&m.mu);
-    size_t scope;
-    for (scope = 0; scope < m.ncovered; scope++) if (m.covered[scope].root == root) break;
-    if (scope == m.ncovered) {
-        m.covered = th_xrealloc(m.covered, (m.ncovered + 1) * sizeof *m.covered);
-        m.covered[m.ncovered++] = (coverage){.root=root, .epoch=UINT64_MAX};
-    }
-    bool full = m.covered[scope].epoch != m.epoch;
-    m.covered[scope].epoch = m.epoch;
+    if (reconciled != m.reconciled) { m.reconciled=reconciled; m.epoch++; }
+    size_t scope=root_scope(root);
+    bool full = m.covered[scope].forced || m.covered[scope].epoch != m.epoch;
+    m.covered[scope].forced=false; m.covered[scope].epoch = m.epoch;
     size_t keep = 0;
     for (size_t i = 0; i < m.npaths; i++) {
         if (m.paths[i].root == root) work[nw++] = m.paths[i];
@@ -273,8 +300,8 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     o.on_dir = watch_dir; o.progress = progress; o.ud = &data;
     int rc = TH_SCAN_OK;
     memset(stats, 0, sizeof *stats);
-    if (full || nw == 0) rc = th_scan_root(db, root, &o, stats, err);
-    else {
+    if (full || (!m.running && nw == 0)) rc = th_scan_root(db, root, &o, stats, err);
+    else if(nw) {
         th_db_root_set_state(db, root, TH_STATE_UPDATING, NULL);
         o.shallow = true;
         for (size_t i = 0; i < nw && rc == TH_SCAN_OK; i++) {
