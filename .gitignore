@@ -3,3 +3,6 @@
 /_CPack_Packages/
 *.deb
 *.rpm
+
+__pycache__/
+*.pyc
