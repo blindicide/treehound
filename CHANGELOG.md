@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — 2026-10-08
+
+- Per-root recovery generations ensure every root reconciles after kernel overflow or explicit verification.
+- Real kernel overflow, multi-root convergence, offline cached searches, SIGKILL restart and SQLite integrity tests.
+- Close the shutdown event descriptor when the watch-thread creation fails.
+
 ## 0.1.0 — 2026-10-08
 
 - Persistent byte-safe SQLite index, filename trigram search, filters and pagination.

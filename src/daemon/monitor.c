@@ -15,6 +15,7 @@
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR | IN_DONT_FOLLOW)
 typedef struct { int wd; int64_t root; char *path; } watch;
 typedef struct { int64_t root; char *path; } dirty;
+typedef struct { int64_t root; uint64_t epoch; } coverage;
 typedef struct { uint32_t cookie; int64_t root; char *from, *to; } move;
 static struct {
     pthread_mutex_t mu;
@@ -22,6 +23,8 @@ static struct {
     int fd, wake;
     pthread_t thread;
     bool running, failed, full;
+    uint64_t epoch;
+    coverage *covered; size_t ncovered;
     watch *watches;
     size_t nwatches, capacity;
     dirty paths[MAX_DIRTY];
@@ -35,6 +38,11 @@ bool monitor_pending(int64_t root)
 {
     pthread_mutex_lock(&m.mu);
     bool result = m.full || m.failed;
+    if (root) {
+        bool found = false;
+        for (size_t i = 0; i < m.ncovered; i++) if (m.covered[i].root == root) { found = true; result |= m.covered[i].epoch != m.epoch; }
+        result |= !found;
+    }
     for (size_t i = 0; i < m.npaths && !result; i++) result = !root || m.paths[i].root == root;
     pthread_mutex_unlock(&m.mu);
     return result;
@@ -42,7 +50,7 @@ bool monitor_pending(int64_t root)
 void monitor_force(int64_t root)
 {
     (void)root;
-    pthread_mutex_lock(&m.mu); m.full = true; pthread_mutex_unlock(&m.mu);
+    pthread_mutex_lock(&m.mu); m.epoch++; pthread_mutex_unlock(&m.mu);
 }
 static void queue_path(int64_t root, const char *path)
 {
@@ -128,6 +136,7 @@ static void *events(void *unused)
             }
         }
         bool full = m.full;
+        if (full) { m.epoch++; m.full = false; }
         pthread_mutex_unlock(&m.mu);
         /* Coalesce the burst with queue entries. No database writes here. */
         for (size_t i = 0; i < nr; i++) daemon_enqueue(m.d, JOB_SCAN, roots[i], false);
@@ -150,7 +159,7 @@ int monitor_start(th_daemon *d)
     if (m.wake < 0) { close(m.fd); m.fd = -1; m.failed = true; return -1; }
     atomic_init(&m.stop, false);
     m.running = true;
-    if (pthread_create(&m.thread, NULL, events, NULL) != 0) { close(m.fd); m.fd = -1; m.running = false; m.failed = true; return -1; }
+    if (pthread_create(&m.thread, NULL, events, NULL) != 0) { close(m.fd); close(m.wake); m.fd = -1; m.running = false; m.failed = true; return -1; }
     return 0;
 }
 void monitor_stop(void)
@@ -160,6 +169,7 @@ void monitor_stop(void)
     for (size_t i = 0; i < m.npaths; i++) free(m.paths[i].path);
     for (size_t i = 0; i < m.nmoves; i++) { free(m.moves[i].from); free(m.moves[i].to); }
     m.nmoves = 0;
+    free(m.covered); m.covered = NULL; m.ncovered = 0;
     free(m.watches); m.watches = NULL; m.nwatches = m.npaths = 0;
 }
 /* Preserve identity when both halves of a same-root move are observed.
@@ -220,8 +230,14 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     dirty work[MAX_DIRTY]; size_t nw = 0;
     move moves[256]; size_t nm = 0;
     pthread_mutex_lock(&m.mu);
-    bool full = m.full;
-    m.full = false;
+    size_t scope;
+    for (scope = 0; scope < m.ncovered; scope++) if (m.covered[scope].root == root) break;
+    if (scope == m.ncovered) {
+        m.covered = th_xrealloc(m.covered, (m.ncovered + 1) * sizeof *m.covered);
+        m.covered[m.ncovered++] = (coverage){root, UINT64_MAX};
+    }
+    bool full = m.covered[scope].epoch != m.epoch;
+    m.covered[scope].epoch = m.epoch;
     size_t keep = 0;
     for (size_t i = 0; i < m.npaths; i++) {
         if (m.paths[i].root == root) work[nw++] = m.paths[i];

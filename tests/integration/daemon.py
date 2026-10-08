@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Real daemon/IPC/filesystem integration; Python is a test-only dependency."""
-import json, os, pathlib, socket, struct, subprocess, sys, tempfile, time
+import json, os, pathlib, signal, socket, struct, subprocess, sys, tempfile, time
 
 with tempfile.TemporaryDirectory(prefix="th-") as tmp:
     base = pathlib.Path(tmp)
@@ -83,7 +83,9 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
     finally:
         proc.terminate(); assert proc.wait(timeout=5) == 0
     (root / "offline.txt").write_bytes(b"offline change")
-    cfg.write_text(f"root = {root}\nwatch = true\nreconcile_interval_hours = 0\n")
+    other = base / "other"
+    other.mkdir(); (other / "deep").mkdir(); (other / "deep" / "overflow-marker.txt").write_bytes(b"old")
+    cfg.write_text(f"root = {root}\nroot = {other}\nwatch = true\nreconcile_interval_hours = 0\n")
     proc = start()
     def eventually(query, count):
         deadline = time.monotonic() + 10
@@ -96,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         assert call("status")["live_indexing"]
         assert call("mounts")["ok"]
         assert not call("config_save", config="watch = maybe")["ok"]
-        saved = call("config_save", config=f"root = {root}\nwatch = true\nreconcile_interval_hours = 0\n")
+        saved = call("config_save", config=f"root = {root}\nroot = {other}\nwatch = true\nreconcile_interval_hours = 0\n")
         assert saved["ok"] and not saved["restart_required"]
         wait_idle()
         assert call("search", query="offline")["items"]
@@ -119,6 +121,45 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         seq = call("rebuild", root_id=roots[0]["id"])["seq"]
         assert wait_idle()["completed_seq"] >= seq
         assert call("search", query="offline")["items"]
+        # Exercise the kernel's actual overflow path without changing sysctls.
+        limit = int(pathlib.Path("/proc/sys/fs/inotify/max_queued_events").read_text())
+        assert limit <= 1000000, "host queue too large for bounded overflow fixture"
+        proc.send_signal(signal.SIGSTOP)
+        try:
+            for i in range(limit + 100):
+                path = root / f"overflow-{i}"
+                path.touch(); path.unlink()
+            (other / "deep" / "overflow-marker.txt").write_bytes(b"changed while queue overflowed")
+            (root / "overflow-survivor.txt").write_bytes(b"survives")
+        finally:
+            proc.send_signal(signal.SIGCONT)
+        eventually("overflow-survivor.txt", 1)
+        deadline = time.monotonic() + 15
+        while call("search", query="overflow-marker.txt")["items"][0]["size"] != 30:
+            assert time.monotonic() < deadline, "overflow did not reconcile the other root"
+            time.sleep(.02)
+        wait_idle()
+    finally:
+        proc.terminate(); assert proc.wait(timeout=5) == 0
+    # An inaccessible root keeps its cached records with an honest Offline state.
+    root.rename(base / "disconnected")
+    proc = start()
+    try:
+        assert next(r for r in call("roots")["roots"] if r["path"] == str(root))["status"] == "offline"
+        assert call("search", query="overflow-survivor")["items"]
+    finally:
+        proc.terminate(); assert proc.wait(timeout=5) == 0
+    (base / "disconnected").rename(root)
+    proc = start()
+    proc.kill(); assert proc.wait(timeout=5) == -signal.SIGKILL
+    (root / "after-crash.txt").write_bytes(b"recover")
+    proc = start()
+    try:
+        assert call("search", query="after-crash.txt")["items"]
+        assert all(r["status"] == "verified" for r in call("roots")["roots"])
+        import sqlite3
+        with sqlite3.connect(base / "state" / "index.db") as db:
+            assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         proc.terminate(); assert proc.wait(timeout=5) == 0
 print("daemon integration passed")

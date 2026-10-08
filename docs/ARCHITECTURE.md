@@ -37,11 +37,15 @@ warnings. No watch limits are changed. Periodic reconciliation is a configurable
 safety net, not the normal live-update path. The event thread blocks on inotify
 and an explicit shutdown eventfd. Search replies inherit root consistency state.
 
-Current development increment: daemon scanning, IPC, live updates and restart
-reconciliation are tested. CLI and GTK explorer/search are implemented. Visual analysis, history and
-release packaging remain pending. CI is configured; its remote result must be verified. Kernel overflow, special filesystems and
-mount namespace behavior still need dedicated validation. This increment is
-not a finished release.
+The daemon/CLI/GTK explorer and search are tested end to end. Native Debian 13
+and Fedora 44 package validation has passed on GitHub Actions. Integration tests
+also stop the daemon, exceed the actual kernel inotify queue, and verify that
+all roots recover. Global recovery generations are consumed separately by each
+root, so an unrelated pending directory diff cannot hide lost events. Offline
+roots retain cached searchable entries with an Offline state. SIGKILL/restart
+reconciles offline edits and passes SQLite integrity checking. Special filesystem
+and mount namespace behavior still require dedicated validation. Treemap,
+history and million-entry measurements follow in subsequent releases.
 
 ## Command-line client
 
