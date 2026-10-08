@@ -47,6 +47,7 @@ add_library(th_base STATIC
     src/core/match.c
     src/core/util.c
     src/core/config.c
+    src/ipc/ipc.c
 )
 target_include_directories(th_base PUBLIC
     ${PROJECT_SOURCE_DIR}/include
