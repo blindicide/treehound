@@ -2,9 +2,9 @@
 
 Native Linux disk-usage browsing and indexed filename/path search, written in C17 with GTK4 and SQLite FTS5. MIT licensed.
 
-**v0.1 foundation with live indexing:** persistent indexing, asynchronous GTK explorer/search, CLI and live inotify updates. Native DEB/RPM install, reinstall, GUI/CLI smoke and removal gates have passed in Debian 13 and Fedora 44. Treemap, history and large-filesystem performance verification follow in the roadmap.
+**v0.2 live indexing:** persistent indexing, asynchronous GTK explorer/search, CLI and live inotify updates. Native DEB/RPM install, reinstall, GUI/CLI smoke and removal gates have passed in Debian 13 and Fedora 44. Treemap, history and large-filesystem performance verification follow in the roadmap.
 
-[Latest release](https://github.com/blindicide/treehound/releases/latest) · [DEB](https://github.com/blindicide/treehound/releases/latest/download/treehound_0.1.1_amd64.deb) · [RPM](https://github.com/blindicide/treehound/releases/latest/download/treehound-0.1.1-1.x86_64.rpm)
+[Latest release](https://github.com/blindicide/treehound/releases/latest) · [DEB](https://github.com/blindicide/treehound/releases/latest/download/treehound_0.2.0_amd64.deb) · [RPM](https://github.com/blindicide/treehound/releases/latest/download/treehound-0.2.0-1.x86_64.rpm)
 
 ![Actual GTK indexed explorer under Xvfb](docs/screenshots/explorer.png)
 

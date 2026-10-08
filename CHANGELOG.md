@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 — 2026-10-08
+
+- Live indexing milestone: coalesced updates, stable same-root moves, multi-root overflow recovery, restart reconciliation and atomic background configuration.
+- Includes the corrected native packaging foundation from v0.1.1.
+
 ## 0.1.1 — 2026-10-08
 
 - Fix const qualification rejected by Fedora 44 strict compilation; v0.1.0 publication was blocked.
