@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Successful full reconciliations prune watches outside the newly enumerated scope. Adding/removing a directory exclusion releases/reinstalls kernel coverage without background scan churn.
+
 - IPC sends and client calls now use monotonic deadlines across partial I/O. Saturated listener probes fail promptly without unlinking the live daemon socket; oversized client requests are rejected before connecting.
 
 - Live root loss retains Offline state and cached records. Watches are released for detached roots and moved-out directory subtrees; explicit verification reinstalls coverage after reconnection.

@@ -14,7 +14,7 @@
 
 #define MAX_DIRTY 4096
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_CLOSE_WRITE | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_ONLYDIR | IN_DONT_FOLLOW)
-typedef struct { int wd; int64_t root; char *path; } watch;
+typedef struct { int wd; int64_t root; char *path; uint64_t scan; } watch;
 typedef struct { int64_t root; char *path; } dirty;
 typedef struct { int64_t root; uint64_t epoch; bool snapshot, forced; } coverage;
 typedef struct { uint32_t cookie; int64_t root; char *from, *to; } move;
@@ -24,7 +24,7 @@ static struct {
     int fd, wake;
     pthread_t thread;
     bool running, failed, full;
-    uint64_t epoch;
+    uint64_t epoch, watch_scan;
     int64_t reconciled;
     coverage *covered; size_t ncovered;
     watch *watches;
@@ -100,10 +100,9 @@ static void queue_path(int64_t root, const char *path)
     if (m.npaths == MAX_DIRTY) { m.full = true; return; }
     m.paths[m.npaths++] = (dirty){root, th_xstrdup(path)};
 }
-static void add_watch(int64_t id, const char *path, size_t len, void *ud)
+static void add_watch(int64_t id, const char *path, size_t len, int64_t root, uint64_t scan)
 {
     (void)id; (void)len;
-    int64_t root = *(int64_t *)ud;
     if (!m.running) return;
     pthread_mutex_lock(&m.mu);
     int wd = inotify_add_watch(m.fd, path, WATCH_MASK);
@@ -120,7 +119,7 @@ static void add_watch(int64_t id, const char *path, size_t len, void *ud)
             }
             m.nwatches++;
         } else free(m.watches[i].path);
-        m.watches[i] = (watch){wd, root, th_xstrdup(path)};
+        m.watches[i] = (watch){wd, root, th_xstrdup(path), scan};
     }
     pthread_mutex_unlock(&m.mu);
 }
@@ -229,6 +228,22 @@ static void release_watches(int64_t root, const char *path)
     m.nwatches = keep;
     pthread_mutex_unlock(&m.mu);
 }
+/* A successful full enumeration marks exactly the directories still in scope.
+ * Sweep once per full scan, without a DB lookup or stat for every watch. */
+static void prune_watches(int64_t root, uint64_t scan)
+{
+    pthread_mutex_lock(&m.mu);
+    size_t keep = 0;
+    for (size_t i = 0; i < m.nwatches; i++) {
+        watch *w = &m.watches[i];
+        if (w->root == root && w->scan != scan) {
+            if (m.running) inotify_rm_watch(m.fd, w->wd);
+            free(w->path);
+        } else m.watches[keep++] = *w;
+    }
+    m.nwatches = keep;
+    pthread_mutex_unlock(&m.mu);
+}
 /* Preserve identity when both halves of a same-root move are observed.
  * Raw-byte paths use substr on BLOBs, avoiding Unicode character offsets. */
 static int apply_move(sqlite3 *db, const move *mv)
@@ -290,10 +305,10 @@ static int apply_move(sqlite3 *db, const move *mv)
     return rc;
 }
 /* Progress uses the preserved scanner's userdata; watch callbacks need the root. */
-typedef struct { const th_scan_opts *original; int64_t root; } scan_data;
+typedef struct { const th_scan_opts *original; int64_t root; uint64_t scan; } scan_data;
 static void watch_dir(int64_t id, const char *path, size_t len, void *ud)
 {
-    scan_data *data = ud; add_watch(id, path, len, &data->root);
+    scan_data *data = ud; add_watch(id, path, len, data->root, data->scan);
     if (data->original->on_dir) data->original->on_dir(id, path, len, data->original->ud);
 }
 static void progress(const th_scan_stats *st, const char *path, void *ud)
@@ -330,12 +345,16 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
         if (apply_move(db, &moves[i]) != 0) full = true;
         free(moves[i].from); free(moves[i].to);
     }
-    scan_data data = {opts, root};
+    bool enumerate = full || (!m.running && nw == 0);
+    pthread_mutex_lock(&m.mu);
+    uint64_t scan = enumerate ? ++m.watch_scan : 0;
+    pthread_mutex_unlock(&m.mu);
+    scan_data data = {opts, root, scan};
     th_scan_opts o = *opts;
     o.on_dir = watch_dir; o.progress = progress; o.ud = &data;
     int rc = TH_SCAN_OK;
     memset(stats, 0, sizeof *stats);
-    if (full || (!m.running && nw == 0)) rc = th_scan_root(db, root, &o, stats, err);
+    if (enumerate) rc = th_scan_root(db, root, &o, stats, err);
     else if(nw) {
         th_db_root_set_state(db, root, TH_STATE_UPDATING, NULL);
         o.shallow = true;
@@ -350,6 +369,7 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
                 rc == TH_SCAN_FAILED ? TH_STATE_ERROR : TH_STATE_STALE,
                 rc == TH_SCAN_FAILED && err ? err->data : NULL);
     }
+    if (enumerate && rc == TH_SCAN_OK && !stats->errors) prune_watches(root, scan);
     if (rc == TH_SCAN_OFFLINE) release_watches(root, NULL);
     for (size_t i = 0; i < nw; i++) free(work[i].path);
     pthread_mutex_lock(&m.mu); bool failed = m.failed; pthread_mutex_unlock(&m.mu);

@@ -191,6 +191,25 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         (outside / "child" / "outgoing.txt").write_bytes(b"outside the configured root")
         time.sleep(.2)
         assert call("status")["completed_seq"] == completed, "moved-out directory still monitored"
+        # Newly excluded subtrees must release previously installed watches.
+        excluded = root / "exclude-me"
+        (excluded / "child").mkdir(parents=True)
+        (excluded / "child" / "excluded-marker.txt").write_bytes(b"visible")
+        eventually("excluded-marker.txt", 1); wait_idle()
+        saved = call("config_save", config=f"root = {root}\nroot = {other}\nexclude = {excluded}\nwatch = true\nreconcile_interval_hours = 0\n")
+        assert saved["ok"]; wait_idle(); eventually("excluded-marker.txt", 0)
+        completed = call("status")["completed_seq"]
+        (excluded / "child" / "excluded-marker.txt").write_bytes(b"excluded from indexing")
+        time.sleep(.2)
+        assert call("status")["completed_seq"] == completed, "excluded subtree still monitored"
+        saved = call("config_save", config=f"root = {root}\nroot = {other}\nwatch = true\nreconcile_interval_hours = 0\n")
+        assert saved["ok"]; wait_idle()
+        assert eventually("excluded-marker.txt", 1)[0]["size"] == len(b"excluded from indexing")
+        (excluded / "child" / "excluded-marker.txt").write_bytes(b"restored")
+        deadline = time.monotonic() + 5
+        while call("search", query="excluded-marker.txt")["items"][0]["size"] != 8:
+            assert time.monotonic() < deadline
+            time.sleep(.02)
         # Live loss of a root must preserve cached records and report Offline.
         disconnected = base / "live-disconnected"
         root.rename(disconnected)

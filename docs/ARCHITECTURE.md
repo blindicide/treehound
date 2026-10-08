@@ -35,7 +35,9 @@ visit affected directories and newly discovered subtrees, preserving unchanged
 subtrees. Same-root paired moves update raw-byte paths and parent relations in
 SQL, preserving descendant IDs and watch paths. Atomic replacements delete the
 old destination inside the same transaction before moving the source. Unpaired moves converge through
-parent diffs and release watches for moved-out subtrees. Offline roots retain
+parent diffs and release watches for moved-out subtrees. Successful full
+reconciliations sweep watches not visited in the new scope, including newly
+excluded directories; incremental jobs retain unaffected coverage. Offline roots retain
 cached records and release their watches; verification or periodic reconciliation
 reinstalls coverage when a root returns. Overflow, unmount and dirty-queue exhaustion request whole-root
 reconciliation; watch failures and enumeration errors leave roots Stale with
