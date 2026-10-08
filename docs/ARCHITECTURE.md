@@ -38,11 +38,15 @@ safety net, not the normal live-update path. The event thread blocks on inotify
 and an explicit shutdown eventfd. Search replies inherit root consistency state.
 
 Current development increment: daemon scanning, IPC, live updates and restart
-reconciliation are tested. CLI/GTK client, visual analysis, history, CI and
-release packaging remain pending. Kernel overflow, special filesystems and
+reconciliation are tested. CLI and GTK explorer/search are implemented. Visual analysis, history and
+release packaging remain pending. CI is configured; its remote result must be verified. Kernel overflow, special filesystems and
 mount namespace behavior still need dedicated validation. This increment is
 not a finished release.
 
 ## Command-line client
 
 `treehound search QUERY` and `status`, `roots`, `scan`, `verify`, `rebuild`, and `config` use only framed daemon IPC. `--json` preserves byte escapes. Search supports `--exact` (the whole query is a name or path), literal `--extension`, case/type/size/mtime/subtree filters, pagination and sorting. `--wait` on scan commands waits for the FIFO completion watermark and checks root consistency; an offline or stale root returns failure. Exit codes are 0 success, 1 no matches, 2 invalid usage, 3 unavailable daemon, 4 operation failure.
+
+## GTK client
+
+The client links `th_base` and GTK, never the database engine. A GTask worker issues bounded IPC calls; the main thread updates a virtualized GtkColumnView backed by at most 200 records. One running request and one replacement request bound rapid typing work. Response generation numbers discard obsolete replies. Directory navigation stores indexed identities and byte paths. Search is debounced by GtkSearchEntry. Root state appears in sidebar and result status; refresh is explicit. A real Xvfb test browses a fixture and searches it through the daemon.

@@ -68,6 +68,13 @@ install(TARGETS treehoundd RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 add_executable(treehound src/cli/main.c)
 target_link_libraries(treehound PRIVATE th_base)
+if(TREEHOUND_BUILD_GUI)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.6)
+    target_sources(treehound PRIVATE src/gui/main.c)
+    target_link_libraries(treehound PRIVATE PkgConfig::GTK4)
+    target_compile_definitions(treehound PRIVATE TH_HAVE_GUI)
+endif()
 install(TARGETS treehound RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(TREEHOUND_BUILD_TESTS)

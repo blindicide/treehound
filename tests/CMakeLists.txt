@@ -15,3 +15,13 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME integration.daemon COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/integration/daemon.py $<TARGET_FILE:treehoundd> $<TARGET_FILE:treehound>)
 set_tests_properties(integration.daemon PROPERTIES LABELS integration TIMEOUT 60)
+
+if(TREEHOUND_BUILD_GUI)
+    find_program(XVFB_RUN xvfb-run)
+    find_program(DBUS_RUN_SESSION dbus-run-session)
+    if(XVFB_RUN AND DBUS_RUN_SESSION)
+        add_test(NAME integration.gui COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/integration/gui.py $<TARGET_FILE:treehoundd> $<TARGET_FILE:treehound>)
+        set_tests_properties(integration.gui PROPERTIES LABELS integration TIMEOUT 30)
+    endif()
+endif()

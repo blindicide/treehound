@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build gcc pkg-config libgtk-4-dev libsqlite3-dev xvfb dbus-x11
+      - name: Configure strict full build
+        run: cmake -S . -B build -G Ninja -DTREEHOUND_WERROR=ON
+      - name: Build GUI, CLI and GTK-free daemon
+        run: cmake --build build
+      - name: Test real daemon, CLI and GTK window
+        run: ctest --test-dir build --output-on-failure
+      - name: Verify executables and daemon dependencies
+        run: |
+          build/treehound --version
+          build/treehoundd --version
+          ! ldd build/treehoundd | grep -E 'libgtk|libgdk'
+      - name: Configure sanitizer build
+        run: cmake -S . -B build-asan -G Ninja -DTREEHOUND_WERROR=ON -DTREEHOUND_BUILD_GUI=OFF -DTREEHOUND_SANITIZE=ON
+      - name: Test sanitizer build
+        run: cmake --build build-asan && ctest --test-dir build-asan --output-on-failure
