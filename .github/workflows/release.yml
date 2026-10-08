@@ -23,9 +23,9 @@ jobs:
         run: |
           if command -v apt-get >/dev/null; then
             apt-get update
-            apt-get install -y git gcc cmake make pkg-config libgtk-4-dev libsqlite3-dev python3 xvfb xauth dbus-x11 procps dpkg-dev file
+            apt-get install -y git gcc cmake make pkg-config libgtk-4-dev libsqlite3-dev python3 xvfb xauth dbus-x11 procps dpkg-dev file curl
           else
-            dnf install -y git gcc cmake make pkgconf-pkg-config gtk4-devel sqlite-devel python3 xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon procps-ng rpm-build file
+            dnf install -y git gcc cmake make pkgconf-pkg-config gtk4-devel sqlite-devel python3 xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon procps-ng rpm-build file curl
           fi
       - uses: actions/checkout@v4
       - name: Check authoritative version and tag
@@ -51,7 +51,16 @@ jobs:
           cpack -G '${{ matrix.format }}'
           cd ..
           package=$(find build -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \))
-          bash scripts/validate-package.sh '${{ matrix.format }}' "$package" '${{ steps.version.outputs.value }}'
+          if [[ '${{ matrix.format }}' == DEB ]]; then
+            previous=treehound_0.4.0_amd64.deb
+          else
+            previous=treehound-0.4.0-1.x86_64.rpm
+          fi
+          mkdir -p build-previous
+          curl --fail --location --retry 3 "https://github.com/blindicide/treehound/releases/download/v0.4.0/$previous" -o "build-previous/$previous"
+          curl --fail --location --retry 3 "https://github.com/blindicide/treehound/releases/download/v0.4.0/SHA256SUMS" -o build-previous/SHA256SUMS
+          (cd build-previous && sha256sum --check --ignore-missing SHA256SUMS)
+          bash scripts/validate-package.sh '${{ matrix.format }}' "$package" '${{ steps.version.outputs.value }}' "build-previous/$previous"
           mkdir -p artifacts
           cp "$package" artifacts/
       - uses: actions/upload-artifact@v4

@@ -5,6 +5,15 @@ set -euo pipefail
 format=$1
 package=$2
 version=$3
+previous=${4:-}
+if [[ -n "$previous" ]]; then
+  case "$format" in
+    DEB) dpkg -i "$previous" ;;
+    RPM) rpm -Uvh "$previous" ;;
+  esac
+  test "$(treehound --version)" = "treehound 0.4.0"
+  python3 tests/integration/package_upgrade.py prepare /usr/bin/treehoundd build-package-upgrade
+fi
 case "$format" in
   DEB)
     test "$(dpkg-deb -f "$package" Package)" = treehound
@@ -25,6 +34,9 @@ case "$format" in
     ;;
   *) exit 2 ;;
 esac
+if [[ -n "$previous" ]]; then
+  python3 tests/integration/package_upgrade.py check /usr/bin/treehoundd build-package-upgrade
+fi
 test "$(treehound --version)" = "treehound $version"
 test "$(treehoundd --version)" = "treehoundd $version"
 test -f /usr/share/applications/treehound.desktop
