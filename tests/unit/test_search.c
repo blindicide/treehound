@@ -430,6 +430,7 @@ static void test_timeout(void)
     th_search_opts o;
     th_search_opts_init(&o);
     o.query = "*u*k*";
+    o.under = "/bulk";
     o.sort = TH_SORT_NAME;
     o.want_total = true;
     o.timeout_ms = 1;

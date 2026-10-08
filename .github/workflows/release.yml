@@ -23,9 +23,9 @@ jobs:
         run: |
           if command -v apt-get >/dev/null; then
             apt-get update
-            apt-get install -y git gcc cmake make pkg-config libgtk-4-dev libsqlite3-dev python3 xvfb xauth dbus-x11 procps dpkg-dev
+            apt-get install -y git gcc cmake make pkg-config libgtk-4-dev libsqlite3-dev python3 xvfb xauth dbus-x11 procps dpkg-dev file
           else
-            dnf install -y git gcc cmake make pkgconf-pkg-config gtk4-devel sqlite-devel python3 xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon procps-ng rpm-build
+            dnf install -y git gcc cmake make pkgconf-pkg-config gtk4-devel sqlite-devel python3 xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon procps-ng rpm-build file
           fi
       - uses: actions/checkout@v4
       - name: Check authoritative version and tag
