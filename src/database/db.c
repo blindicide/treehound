@@ -442,10 +442,11 @@ int th_db_root_get(sqlite3 *db, int64_t id, th_root *out)
     if (!st)
         return -1;
     sqlite3_bind_int64(st, 1, id);
-    int rc = -1;
-    if (sqlite3_step(st) == SQLITE_ROW) {
+    int step = sqlite3_step(st);
+    int rc = step == SQLITE_DONE ? 0 : -1;
+    if (step == SQLITE_ROW) {
         root_from_stmt(out, st);
-        rc = 0;
+        rc = 1;
     }
     sqlite3_finalize(st);
     return rc;
@@ -512,10 +513,11 @@ int th_db_entry_get(sqlite3 *db, int64_t id, th_entry *out)
     if (!st)
         return -1;
     sqlite3_bind_int64(st, 1, id);
-    int rc = -1;
-    if (sqlite3_step(st) == SQLITE_ROW) {
+    int step = sqlite3_step(st);
+    int rc = step == SQLITE_DONE ? 0 : -1;
+    if (step == SQLITE_ROW) {
         th_entry_from_stmt(out, st, 0);
-        rc = 0;
+        rc = 1;
     }
     sqlite3_finalize(st);
     return rc;
@@ -528,10 +530,11 @@ int th_db_entry_by_path(sqlite3 *db, const char *path, size_t len, th_entry *out
     if (!st)
         return -1;
     th_bind_bytes(st, 1, path, len);
-    int rc = -1;
-    if (sqlite3_step(st) == SQLITE_ROW) {
+    int step = sqlite3_step(st);
+    int rc = step == SQLITE_DONE ? 0 : -1;
+    if (step == SQLITE_ROW) {
         th_entry_from_stmt(out, st, 0);
-        rc = 0;
+        rc = 1;
     }
     sqlite3_finalize(st);
     return rc;

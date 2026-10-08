@@ -116,6 +116,7 @@ void th_subtree_range(const char *dir, size_t len, th_strbuf *lo, th_strbuf *hi)
 /* ---- roots ---- */
 int th_db_roots(sqlite3 *db, th_root **out, size_t *n);
 void th_roots_free(th_root *roots, size_t n);
+/* Getters return 1 when found, 0 when absent, -1 on error. */
 int th_db_root_get(sqlite3 *db, int64_t id, th_root *out);
 /* Returns the id of the root with this path, inserting it when absent. */
 int64_t th_db_root_ensure(sqlite3 *db, const char *path);

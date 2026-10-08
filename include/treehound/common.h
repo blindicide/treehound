@@ -35,7 +35,7 @@ enum {
     TH_FLAG_MOUNTPOINT = 1 << 1, /* another filesystem is mounted here */
     TH_FLAG_SPARSE = 1 << 2,     /* allocated size < logical size */
     TH_FLAG_LINKDUP = 1 << 3,    /* hard link already counted elsewhere */
-    TH_FLAG_EXCLUDED = 1 << 4,   /* reserved: excluded by configuration */
+    TH_FLAG_EXCLUDED = 1 << 4,   /* listed but not descended (eCryptfs lower dir) */
     TH_FLAG_NOWATCH = 1 << 5,    /* directory has no inotify watch */
 };
 

@@ -55,6 +55,8 @@ target_include_directories(th_base PUBLIC
 # ---- th_engine: database, indexer and search; only treehoundd links it -----
 add_library(th_engine STATIC
     src/database/db.c
+    src/indexer/indexer.c
+    src/indexer/mounts.c
 )
 target_link_libraries(th_engine PUBLIC th_base SQLite::SQLite3 Threads::Threads)
 

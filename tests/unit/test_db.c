@@ -98,13 +98,13 @@ static void test_entries(void)
 
     /* byte-exact round trip of invalid UTF-8 */
     th_entry e;
-    REQUIRE(th_db_entry_by_path(db, "/home/u/bad\xff.bin", 16, &e) == 0);
+    REQUIRE(th_db_entry_by_path(db, "/home/u/bad\xff.bin", 16, &e) == 1);
     CHECK_INT(e.id, bad);
     CHECK_INT(e.name_len, 8);
     CHECK(memcmp(e.name, "bad\xff.bin", 8) == 0);
     CHECK_INT(e.size, 7);
     th_entry_clear(&e);
-    CHECK(th_db_entry_get(db, 999999, &e) != 0);
+    CHECK_INT(th_db_entry_get(db, 999999, &e), 0);
 
     /* FTS trigram candidates confirmed by th_match */
     st = th_db_prepare(db, "SELECT e.path FROM entries_fts f JOIN entries e ON e.id = f.rowid "
@@ -171,7 +171,7 @@ static void test_entries(void)
     th_roots_free(roots, nroots);
     CHECK_INT(th_db_root_set_state(db, r, TH_STATE_ERROR, "boom"), 0);
     th_root root;
-    CHECK_INT(th_db_root_get(db, r, &root), 0);
+    CHECK_INT(th_db_root_get(db, r, &root), 1);
     CHECK_INT(root.state, TH_STATE_ERROR);
     CHECK_STR(root.error, "boom");
     th_root_clear(&root);
