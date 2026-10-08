@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The daemon initializes UTF-8 character folding before worker threads, fixing non-ASCII case-insensitive searches in service environments using the C locale. Actual IPC tests cover trigram, short-query fallback and case-sensitive behavior.
+
 - A metadata or directory-read I/O failure retains cached children instead of interpreting partial enumeration as deletion. A syscall-injected restart/recovery regression runs without privileges; permission-denial checks explicitly skip privileged package-test UIDs.
 
 - Parent reconciliation preserves same-parent directory/descendant identity when it observes a rename before the inotify pair reaches the writer. Bounded inode lookup and byte-safe path updates avoid a recursive rescan; tests cover both sort directions and Unicode ancestors.

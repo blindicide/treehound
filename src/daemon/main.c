@@ -7,6 +7,7 @@
 #include "treehound/util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <locale.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -97,6 +98,10 @@ int main(int argc, char **argv)
     pthread_sigmask(SIG_BLOCK, &mask, NULL);
     int sigfd = signalfd(-1, &mask, SFD_CLOEXEC | SFD_NONBLOCK);
     th_log_init("treehoundd");
+    /* Service environments often use C. Initialize character folding before
+     * starting threads; retain C numeric formatting for JSON and configuration. */
+    if (!setlocale(LC_CTYPE, "C.UTF-8"))
+        th_log(TH_LOG_WARN, "C.UTF-8 unavailable; non-ASCII case folding is incomplete");
     th_strbuf err; th_sb_init(&err);
     pthread_mutex_init(&d.mu, NULL);
     pthread_cond_init(&d.cv, NULL); pthread_cond_init(&d.conn_cv, NULL);

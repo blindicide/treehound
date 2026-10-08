@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
             time.sleep(.02)
         raise AssertionError("daemon did not become idle")
     def start():
-        proc = subprocess.Popen(command)
+        proc = subprocess.Popen(command, env=dict(os.environ, LC_ALL="C"))
         try: wait_idle()
         except BaseException: proc.terminate(); proc.wait(); raise
         return proc
@@ -65,6 +65,9 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         assert call("search", query="hello space.txt", exact=True)["items"][0]["name"] == "hello space.txt"
         assert not call("search", query="hello", exact=True)["items"]
         assert call("search", extension="pdf")["items"][0]["name"] == "unicodé.pdf"
+        assert call("search", query="UNICODÉ")["items"], "daemon failed Unicode case folding"
+        assert not call("search", query="UNICODÉ", case_sensitive=True)["items"]
+        assert call("search", query="É")["items"], "short Unicode fallback failed case folding"
         def cli(*args):
             return subprocess.run([sys.argv[2], *args, "--socket", sockpath], capture_output=True, timeout=10)
         c = cli("search", "bad", "--json")
