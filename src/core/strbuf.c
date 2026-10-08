@@ -106,6 +106,7 @@ void th_sb_putc(th_strbuf *sb, char c)
 
 void th_sb_vprintf(th_strbuf *sb, const char *fmt, va_list ap)
 {
+    if (!fmt) abort();
     va_list ap2;
     va_copy(ap2, ap);
     int n = vsnprintf(NULL, 0, fmt, ap2);
