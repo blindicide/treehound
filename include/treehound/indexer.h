@@ -44,6 +44,7 @@ typedef struct {
     th_scan_progress_fn progress;
     th_scan_dir_fn on_dir;
     void *ud;               /* passed to progress and on_dir */
+    void (*defer_aggregate)(int64_t directory_id, void *ud); /* caller must refresh queued ancestors before verification */
     unsigned progress_ms;   /* minimum interval between progress calls; 0 = 250 */
     bool shallow;          /* event diff: descend only newly discovered directories */
     size_t batch_rows;      /* writes per transaction; 0 = 10000 */
@@ -75,6 +76,9 @@ int th_scan_subtree(sqlite3 *db, int64_t root_id, const char *path, size_t len, 
 int th_index_refresh_dir(sqlite3 *db, int64_t dir_id);
 /* Recomputes aggregates of every ancestor of entry_id, nearest first. */
 int th_index_refresh_ancestors(sqlite3 *db, int64_t entry_id);
+
+/* Refresh each supplied directory and its ancestors once, deepest first. */
+int th_index_refresh_batch(sqlite3 *db, const int64_t *directories, size_t count);
 
 /* Opens a directory by absolute path, walking component by component when
  * the path exceeds PATH_MAX.  The last component is not followed unless

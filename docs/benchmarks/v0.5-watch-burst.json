@@ -1,0 +1,90 @@
+{
+  "description": "Real 20000-directory/40001-entry fixture; 1000 queued file writes; baseline and incremental optimization candidates. Candidate hashes identify binaries built from dirty sources on recorded base HEAD. Original reports/indexes retained in build-benchmark-watches. Underlying media unidentified; stat filesystem label ext2/ext3 denotes the ext-family host mount, not a physical filesystem comparison.",
+  "runs": {
+    "baseline2": {
+      "measured_at_utc": "2026-10-08T22:18:04Z",
+      "head": "58f20155003718977e14d8ca9c4764baa3da9bc1",
+      "binary_sha256": "2242f690e2c208ea3defb8d4e15a047cf8ba65596f60c0c4c106adfc00dd56f3",
+      "version": "treehoundd 0.5.0",
+      "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+      "filesystem": "ext2/ext3",
+      "directories": 20000,
+      "indexed_entries": 40001,
+      "kernel_watches": 20001,
+      "initial_scan_seconds": 2.5169342040317133,
+      "burst_files": 1000,
+      "burst_seconds": 16.951280387002043,
+      "burst_cpu_seconds": 26.89,
+      "memory": {
+        "VmHWM": 36552704,
+        "VmRSS": 36552704
+      }
+    },
+    "batch1": {
+      "measured_at_utc": "2026-10-08T22:20:21Z",
+      "head": "58f20155003718977e14d8ca9c4764baa3da9bc1",
+      "binary_sha256": "0f3318b2b63e0ce66eef1ffa97b093b262795deaee3fe5bf9861680cac32d6cd",
+      "version": "treehoundd 0.5.0",
+      "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+      "filesystem": "ext2/ext3",
+      "directories": 20000,
+      "indexed_entries": 40001,
+      "kernel_watches": 20001,
+      "initial_scan_seconds": 2.800916712032631,
+      "root_logical_size_before": 82484768,
+      "root_logical_size_after": 82485768,
+      "burst_files": 1000,
+      "burst_seconds": 11.113961198017932,
+      "burst_cpu_seconds": 17.47,
+      "memory": {
+        "VmHWM": 36511744,
+        "VmRSS": 36511744
+      },
+      "working_tree_dirty": true
+    },
+    "batch2": {
+      "measured_at_utc": "2026-10-08T22:20:57Z",
+      "head": "58f20155003718977e14d8ca9c4764baa3da9bc1",
+      "binary_sha256": "fc550db71268ddfd55619b39cf90b1ed542abf9ffdbee04648246f8ec298297d",
+      "version": "treehoundd 0.5.0",
+      "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+      "filesystem": "ext2/ext3",
+      "directories": 20000,
+      "indexed_entries": 40001,
+      "kernel_watches": 20001,
+      "initial_scan_seconds": 2.8128105280338787,
+      "root_logical_size_before": 82484768,
+      "root_logical_size_after": 82485768,
+      "burst_files": 1000,
+      "burst_seconds": 5.775910341995768,
+      "burst_cpu_seconds": 9.04,
+      "memory": {
+        "VmHWM": 36519936,
+        "VmRSS": 36519936
+      },
+      "working_tree_dirty": true
+    },
+    "batch3": {
+      "measured_at_utc": "2026-10-08T22:21:30Z",
+      "head": "58f20155003718977e14d8ca9c4764baa3da9bc1",
+      "binary_sha256": "a07da50399a9e872fc0785bb794fc41f501346c4d2ac56e74e68531ac1fd8adc",
+      "version": "treehoundd 0.5.0",
+      "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+      "filesystem": "ext2/ext3",
+      "directories": 20000,
+      "indexed_entries": 40001,
+      "kernel_watches": 20001,
+      "initial_scan_seconds": 2.5509408169891685,
+      "root_logical_size_before": 82484768,
+      "root_logical_size_after": 82485768,
+      "burst_files": 1000,
+      "burst_seconds": 0.8358240659581497,
+      "burst_cpu_seconds": 1.13,
+      "memory": {
+        "VmHWM": 35106816,
+        "VmRSS": 35106816
+      },
+      "working_tree_dirty": true
+    }
+  }
+}

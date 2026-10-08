@@ -278,6 +278,19 @@ static void test_hardlink_sparse(void)
     th_db_close(db);
 }
 
+typedef struct { int64_t ids[64]; size_t n; } aggregate_queue;
+static void queue_aggregate(int64_t id, void *ud)
+{
+    aggregate_queue *q = ud;
+    REQUIRE(q->n < 64);
+    q->ids[q->n++] = id;
+}
+static void flush_aggregates(sqlite3 *db, aggregate_queue *q)
+{
+    CHECK_INT(th_index_refresh_batch(db, q->ids, q->n), 0);
+    q->n = 0;
+}
+
 static void test_hardlink_subtree(void)
 {
     mk_dir("links"); mk_dir("links/a"); mk_dir("links/b"); mk_file("links/a/orig", 4096);
@@ -289,7 +302,10 @@ static void test_hardlink_subtree(void)
     /* Modify through just one directory: the other indexed link must update. */
     mk_file("links/a/orig", 8192); char *dir = tpath("links/a");
     th_strbuf err; th_sb_init(&err); th_scan_stats st;
-    CHECK_INT(th_scan_subtree(db, rid, dir, strlen(dir), NULL, &st, &err), TH_SCAN_OK);
+    aggregate_queue queue = {0};
+    th_scan_opts opts = {.defer_aggregate=queue_aggregate, .ud=&queue};
+    CHECK_INT(th_scan_subtree(db, rid, dir, strlen(dir), &opts, &st, &err), TH_SCAN_OK);
+    flush_aggregates(db, &queue);
     th_entry e; REQUIRE(get(db, "links/b/hard", &e) == 1); CHECK_INT(e.size, 8192); th_entry_clear(&e);
     /* Remove whichever row contributes to totals, leaving its sibling unscanned. */
     const char *canonical = x.flags & TH_FLAG_LINKDUP ? b : a;
@@ -297,7 +313,8 @@ static void test_hardlink_subtree(void)
     REQUIRE(unlink(canonical) == 0); free(dir); dir = th_xstrdup(root);
     const char *slash = strrchr(canonical, '/'); size_t length = (size_t)(slash - canonical);
     char *parent = th_xmemdup(canonical, length);
-    CHECK_INT(th_scan_subtree(db, rid, parent, length, NULL, &st, &err), TH_SCAN_OK);
+    CHECK_INT(th_scan_subtree(db, rid, parent, length, &opts, &st, &err), TH_SCAN_OK);
+    flush_aggregates(db, &queue);
     REQUIRE(get(db, survivor, &e) == 1); CHECK(!(e.flags & TH_FLAG_LINKDUP)); CHECK_INT(e.size, 8192); th_entry_clear(&e);
     REQUIRE(get(db, "links", &e) == 1);
     struct stat rs, as, bs; REQUIRE(stat(root, &rs) == 0);
@@ -426,7 +443,10 @@ static void test_subtree(void)
     memset(&st, 0, sizeof st);
     th_strbuf err;
     th_sb_init(&err);
-    CHECK_INT(th_scan_subtree(db, rid, sub, strlen(sub), NULL, &st, &err), TH_SCAN_OK);
+    aggregate_queue queue = {0};
+    th_scan_opts opts = {.defer_aggregate=queue_aggregate, .ud=&queue};
+    CHECK_INT(th_scan_subtree(db, rid, sub, strlen(sub), &opts, &st, &err), TH_SCAN_OK);
+    flush_aggregates(db, &queue);
     CHECK_INT(st.added, 1);
     CHECK(exists(db, "t5/x/y/g"));
     CHECK_INT(agg_size(db, "t5"), before + 1000);
@@ -441,14 +461,16 @@ static void test_subtree(void)
     mk_dir("t5/x/new/inner");
     mk_file("t5/x/new/inner/h", 20);
     char *nsub = tpath("t5/x/new/inner");
-    CHECK_INT(th_scan_subtree(db, rid, nsub, strlen(nsub), NULL, &st, &err), TH_SCAN_OK);
+    CHECK_INT(th_scan_subtree(db, rid, nsub, strlen(nsub), &opts, &st, &err), TH_SCAN_OK);
+    flush_aggregates(db, &queue);
     CHECK(exists(db, "t5/x/new/inner/h"));
     CHECK(agg_size(db, "t5/x/new") >= agg_size(db, "t5/x/new/inner") + 20);
 
     /* deleted subtree */
     char *xp = tpath("t5/x");
     rm_tree(xp);
-    CHECK_INT(th_scan_subtree(db, rid, sub, strlen(sub), NULL, &st, &err), TH_SCAN_OK);
+    CHECK_INT(th_scan_subtree(db, rid, sub, strlen(sub), &opts, &st, &err), TH_SCAN_OK);
+    flush_aggregates(db, &queue);
     CHECK(!exists(db, "t5/x"));
     CHECK(!exists(db, "t5/x/y/f"));
     check_consistent(db);

@@ -307,7 +307,16 @@ static int apply_move(sqlite3 *db, const move *mv)
     return rc;
 }
 /* Progress uses the preserved scanner's userdata; watch callbacks need the root. */
-typedef struct { const th_scan_opts *original; int64_t root; uint64_t scan; } scan_data;
+typedef struct { const th_scan_opts *original; int64_t root; uint64_t scan; int64_t *aggregates; size_t naggregates, capacity; } scan_data;
+static void defer_aggregate(int64_t id, void *ud)
+{
+    scan_data *data = ud;
+    if (data->naggregates == data->capacity) {
+        data->capacity = data->capacity ? data->capacity * 2 : 64;
+        data->aggregates = th_xrealloc(data->aggregates, data->capacity * sizeof *data->aggregates);
+    }
+    data->aggregates[data->naggregates++] = id;
+}
 static void watch_dir(int64_t id, const char *path, size_t len, void *ud)
 {
     scan_data *data = ud; add_watch(id, path, len, data->root, data->scan);
@@ -354,7 +363,7 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     /* Only a full retry can prove a prior coverage gap has closed. */
     if (enumerate) m.covered[scope].failed = false;
     pthread_mutex_unlock(&m.mu);
-    scan_data data = {opts, root, scan};
+    scan_data data = {.original=opts, .root=root, .scan=scan};
     th_scan_opts o = *opts;
     o.on_dir = watch_dir; o.progress = progress; o.ud = &data;
     int rc = TH_SCAN_OK;
@@ -363,17 +372,23 @@ int monitor_scan(sqlite3 *db, int64_t root, const th_scan_opts *opts, th_scan_st
     else if(nw) {
         th_db_root_set_state(db, root, TH_STATE_UPDATING, NULL);
         o.shallow = true;
+        if (nw >= 32) o.defer_aggregate = defer_aggregate;
         for (size_t i = 0; i < nw && rc == TH_SCAN_OK; i++) {
             th_scan_stats st;
             rc = th_scan_subtree(db, root, work[i].path, strlen(work[i].path), &o, &st, err);
             stats->dirs += st.dirs; stats->entries += st.entries; stats->added += st.added;
             stats->updated += st.updated; stats->removed += st.removed; stats->errors += st.errors;
         }
+        if (data.naggregates && th_index_refresh_batch(db, data.aggregates, data.naggregates) != 0) {
+            rc = TH_SCAN_FAILED;
+            if (err) th_sb_puts(err, "batch ancestor aggregation failed");
+        }
         if (rc != TH_SCAN_OFFLINE)
             th_db_root_set_state(db, root, rc == TH_SCAN_OK ? TH_STATE_VERIFIED :
                 rc == TH_SCAN_FAILED ? TH_STATE_ERROR : TH_STATE_STALE,
                 rc == TH_SCAN_FAILED && err ? err->data : NULL);
     }
+    free(data.aggregates);
     if (enumerate && rc == TH_SCAN_OK && !stats->errors) prune_watches(root, scan);
     if (rc == TH_SCAN_OFFLINE) release_watches(root, NULL);
     for (size_t i = 0; i < nw; i++) free(work[i].path);

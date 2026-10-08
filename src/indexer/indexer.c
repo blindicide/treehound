@@ -134,6 +134,38 @@ int th_index_refresh_ancestors(sqlite3 *db, int64_t entry_id)
     return rc;
 }
 
+/* Deduplicate shared ancestors in SQLite; no filesystem traversal. */
+int th_index_refresh_batch(sqlite3 *db, const int64_t *directories, size_t count)
+{
+    if (sqlite3_exec(db, "CREATE TEMP TABLE IF NOT EXISTS aggregate_pending(id INTEGER PRIMARY KEY); DELETE FROM aggregate_pending", NULL, NULL, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_stmt *ins = th_db_prepare(db, "INSERT OR IGNORE INTO aggregate_pending VALUES(?)");
+    int rc = ins ? 0 : -1;
+    for (size_t i = 0; i < count && rc == 0; i++) {
+        sqlite3_reset(ins); sqlite3_bind_int64(ins, 1, directories[i]);
+        if (sqlite3_step(ins) != SQLITE_DONE) rc = -1;
+    }
+    sqlite3_finalize(ins);
+    sqlite3_stmt *rows = rc == 0 ? th_db_prepare(db,
+        "WITH RECURSIVE a(id,parent_id,path) AS ("
+        "SELECT e.id,e.parent_id,e.path FROM entries e JOIN aggregate_pending p ON e.id=p.id "
+        "UNION SELECT e.id,e.parent_id,e.path FROM entries e JOIN a ON e.id=a.parent_id) "
+        "SELECT id FROM a ORDER BY path DESC") : NULL;
+    sqlite3_stmt *sel = th_db_prepare(db, AGG_SELECT_SQL), *upd = th_db_prepare(db, AGG_UPDATE_SQL);
+    if (!rows || !sel || !upd || th_db_begin(db) != 0) rc = -1;
+    bool transaction = rc == 0;
+    int step = SQLITE_DONE;
+    while (rc == 0 && (step = sqlite3_step(rows)) == SQLITE_ROW)
+        if (refresh_dir_with(sel, upd, sqlite3_column_int64(rows, 0)) < 0) rc = -1;
+    if (step != SQLITE_DONE) rc = -1;
+    sqlite3_finalize(rows); sqlite3_finalize(sel); sqlite3_finalize(upd);
+    if (transaction) {
+        if (rc == 0 && th_db_commit(db) != 0) rc = -1;
+        if (rc != 0) th_db_rollback(db);
+    }
+    return rc;
+}
+
 /* ---- scan context ---- */
 
 typedef struct {
@@ -720,6 +752,16 @@ static int walk(scan_ctx *c)
     return 0;
 }
 
+static int refresh_ancestors_for(scan_ctx *c, int64_t entry)
+{
+    if (!c->o || !c->o->defer_aggregate) return th_index_refresh_ancestors(c->db, entry);
+    th_entry e = {0};
+    int found = th_db_entry_get(c->db, entry, &e);
+    if (found > 0 && e.parent_id) c->o->defer_aggregate(e.parent_id, c->o->ud);
+    th_entry_clear(&e);
+    return found < 0 ? -1 : 0;
+}
+
 /* Only touched hard-link inodes: retain one canonical row per root, and
  * propagate shared metadata without traversing unrelated filesystem paths. */
 static int repair_links(scan_ctx *c)
@@ -727,7 +769,7 @@ static int repair_links(scan_ctx *c)
     sqlite3_stmt *rows = th_db_prepare(c->db,
         "SELECT e.id,e.parent_id,e.id=(SELECT min(x.id) FROM entries x WHERE x.root_id=e.root_id AND x.dev=e.dev AND x.ino=e.ino AND x.type=0),"
         "coalesce(t.size,e.size),coalesce(t.alloc,e.alloc),coalesce(t.mtime,e.mtime),coalesce(t.nlink,e.nlink),e.flags "
-        "FROM temp.scan_links t JOIN entries e ON e.dev=t.dev AND e.ino=t.ino WHERE e.root_id=? AND e.type=0");
+        "FROM temp.scan_links t CROSS JOIN entries e INDEXED BY entries_inode ON e.dev=t.dev AND e.ino=t.ino WHERE e.root_id=? AND e.type=0");
     sqlite3_stmt *upd = th_db_prepare(c->db,
         "UPDATE entries SET flags=?2,size=?3,alloc=?4,agg_size=?3,agg_alloc=?4,mtime=?5,nlink=?6 "
         "WHERE id=?1 AND (flags<>?2 OR size<>?3 OR alloc<>?4 OR mtime<>?5 OR nlink<>?6)");
@@ -744,7 +786,7 @@ static int repair_links(scan_ctx *c)
         if (sqlite3_changes(c->db)) { changed = th_xrealloc(changed, (n + 1) * sizeof *changed); changed[n++] = id; }
     }
     sqlite3_finalize(rows); sqlite3_finalize(upd);
-    for (size_t i = 0; rc == SQLITE_DONE && i < n; i++) if (th_index_refresh_ancestors(c->db, changed[i]) != 0) rc = SQLITE_ERROR;
+    for (size_t i = 0; rc == SQLITE_DONE && i < n; i++) if (refresh_ancestors_for(c, changed[i]) != 0) rc = SQLITE_ERROR;
     free(changed); return rc == SQLITE_DONE ? 0 : -1;
 }
 
@@ -752,7 +794,7 @@ static int repair_links(scan_ctx *c)
 static int aggregate_subtree(scan_ctx *c, int64_t top_id, const char *path, size_t len)
 {
     th_subtree_range(path, len, &c->lo, &c->hi);
-    sqlite3_stmt *s = th_db_prepare(c->db, "SELECT id FROM entries WHERE root_id = ? AND type = 1 "
+    sqlite3_stmt *s = th_db_prepare(c->db, "SELECT id FROM entries INDEXED BY sqlite_autoindex_entries_1 WHERE root_id = ? AND type = 1 "
                                            "AND path >= ? AND path < ? ORDER BY path DESC");
     if (!s)
         return db_fail(c, "prepare aggregate");
@@ -1082,7 +1124,8 @@ int th_scan_subtree(sqlite3 *db, int64_t root_id, const char *path, size_t len, 
     } else {
         int rc;
         if (id)
-            rc = th_index_refresh_ancestors(db, id);
+            rc = refresh_ancestors_for(&c, id);
+        else if (o && o->defer_aggregate) { o->defer_aggregate(parent, o->ud); rc = 0; }
         else
             rc = th_index_refresh_dir(db, parent) == 0 ? th_index_refresh_ancestors(db, parent) : -1;
         if (rc != 0)

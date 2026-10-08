@@ -29,6 +29,8 @@ configured with different sockets. SIGTERM/SIGINT cancel scanning and drain
 connections before joining the writer. SQLite WAL provides crash recovery.
 No service is enabled automatically.
 
+Bursts of 32 or more dirty scopes defer ancestor recalculation until the directory diffs finish. A recursive SQLite set deduplicates affected directories and their ancestors, updating deepest first in one transaction. Smaller jobs retain direct propagation. Subtree aggregation uses the byte-path unique index; hard-link repair drives the inode index from the touched-inode set. This bounds work to indexed scopes and their ancestry without traversing unrelated filesystem paths.
+
 Inotify watches are installed before directory enumeration. The event reader
 coalesces at most 4,096 dirty directories and queues writer jobs. Event diffs
 visit affected directories and newly discovered subtrees, preserving unchanged
@@ -41,7 +43,7 @@ excluded directories; incremental jobs retain unaffected coverage. Offline roots
 cached records and release their watches; verification or periodic reconciliation
 reinstalls coverage when a root returns. Overflow, unmount and dirty-queue exhaustion request whole-root
 reconciliation; watch failures and enumeration errors leave roots Stale with
-warnings. No watch limits are changed. Periodic reconciliation is a configurable
+warnings. Watch-registration failures belong to their root; full verification retries and clears recovered coverage. No watch limits are changed. Periodic reconciliation is a configurable
 safety net, not the normal live-update path. The event thread blocks on inotify
 and an explicit shutdown eventfd. Search replies inherit root consistency state.
 
