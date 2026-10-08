@@ -1,0 +1,485 @@
+{
+  "count": 1000000,
+  "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+  "fixture_seconds": 53.18839144700905,
+  "filesystem": "ext2/ext3",
+  "cpu_count": 4,
+  "scan_seconds": 62.34617974399589,
+  "indexed_entries": 1001001,
+  "scan_peak_rss_bytes": 22855680,
+  "roots": [
+    {
+      "id": 1,
+      "entry_id": 1,
+      "path": "/benchmark/files",
+      "status": "verified",
+      "error": "",
+      "size": 66368480,
+      "allocated": 1295069184,
+      "files": 1000000,
+      "directories": 1000,
+      "last_verified": 1791495161
+    }
+  ],
+  "search_samples": [
+    {
+      "query": "5fe",
+      "length": 3,
+      "ms": 26.865595020353794,
+      "returned": 200,
+      "engine_ms": 23.4729
+    },
+    {
+      "query": "a80",
+      "length": 3,
+      "ms": 27.433773037046194,
+      "returned": 200,
+      "engine_ms": 24.0926
+    },
+    {
+      "query": "edb",
+      "length": 3,
+      "ms": 26.38233796460554,
+      "returned": 200,
+      "engine_ms": 23.7168
+    },
+    {
+      "query": "c35",
+      "length": 3,
+      "ms": 27.545665041543543,
+      "returned": 200,
+      "engine_ms": 23.9462
+    },
+    {
+      "query": "418",
+      "length": 3,
+      "ms": 47.77940799249336,
+      "returned": 200,
+      "engine_ms": 45.3211
+    },
+    {
+      "query": "b46",
+      "length": 3,
+      "ms": 24.80145200388506,
+      "returned": 200,
+      "engine_ms": 21.9739
+    },
+    {
+      "query": "385",
+      "length": 3,
+      "ms": 43.115462991409004,
+      "returned": 200,
+      "engine_ms": 40.1759
+    },
+    {
+      "query": "bd6",
+      "length": 3,
+      "ms": 27.602101035881788,
+      "returned": 200,
+      "engine_ms": 24.1154
+    },
+    {
+      "query": "412",
+      "length": 3,
+      "ms": 44.946570007596165,
+      "returned": 200,
+      "engine_ms": 40.3449
+    },
+    {
+      "query": "bcf",
+      "length": 3,
+      "ms": 26.810321025550365,
+      "returned": 200,
+      "engine_ms": 22.7937
+    },
+    {
+      "query": "7ff",
+      "length": 3,
+      "ms": 25.854980980511755,
+      "returned": 200,
+      "engine_ms": 22.1921
+    },
+    {
+      "query": "4a0",
+      "length": 3,
+      "ms": 25.624549016356468,
+      "returned": 200,
+      "engine_ms": 22.6732
+    },
+    {
+      "query": "801",
+      "length": 3,
+      "ms": 42.41692501818761,
+      "returned": 200,
+      "engine_ms": 39.4114
+    },
+    {
+      "query": "aec",
+      "length": 3,
+      "ms": 25.49526101211086,
+      "returned": 200,
+      "engine_ms": 21.7426
+    },
+    {
+      "query": "61f",
+      "length": 3,
+      "ms": 28.31000305013731,
+      "returned": 200,
+      "engine_ms": 24.7567
+    },
+    {
+      "query": "5f3",
+      "length": 3,
+      "ms": 25.153058988507837,
+      "returned": 200,
+      "engine_ms": 22.4149
+    },
+    {
+      "query": "4cb",
+      "length": 3,
+      "ms": 27.347092982381582,
+      "returned": 200,
+      "engine_ms": 23.3373
+    },
+    {
+      "query": "9e1",
+      "length": 3,
+      "ms": 26.44250902812928,
+      "returned": 200,
+      "engine_ms": 22.4973
+    },
+    {
+      "query": "f96",
+      "length": 3,
+      "ms": 25.751703011337668,
+      "returned": 200,
+      "engine_ms": 22.0342
+    },
+    {
+      "query": "737",
+      "length": 3,
+      "ms": 40.30585999134928,
+      "returned": 200,
+      "engine_ms": 35.7794
+    },
+    {
+      "query": "396",
+      "length": 3,
+      "ms": 42.36680903704837,
+      "returned": 200,
+      "engine_ms": 39.5731
+    },
+    {
+      "query": "654",
+      "length": 3,
+      "ms": 44.592879014089704,
+      "returned": 200,
+      "engine_ms": 39.5376
+    },
+    {
+      "query": "809",
+      "length": 3,
+      "ms": 43.90029300702736,
+      "returned": 200,
+      "engine_ms": 39.414
+    },
+    {
+      "query": "eef",
+      "length": 3,
+      "ms": 28.477907995693386,
+      "returned": 200,
+      "engine_ms": 25.2055
+    },
+    {
+      "query": "09d",
+      "length": 3,
+      "ms": 30.637769028544426,
+      "returned": 200,
+      "engine_ms": 27.1858
+    },
+    {
+      "query": "0f2",
+      "length": 3,
+      "ms": 26.06290898984298,
+      "returned": 200,
+      "engine_ms": 22.5267
+    },
+    {
+      "query": "433",
+      "length": 3,
+      "ms": 41.527446010150015,
+      "returned": 200,
+      "engine_ms": 38.4427
+    },
+    {
+      "query": "0e4",
+      "length": 3,
+      "ms": 25.527281977701932,
+      "returned": 200,
+      "engine_ms": 22.0688
+    },
+    {
+      "query": "18c",
+      "length": 3,
+      "ms": 27.417089033406228,
+      "returned": 200,
+      "engine_ms": 23.7417
+    },
+    {
+      "query": "c22",
+      "length": 3,
+      "ms": 27.46468101395294,
+      "returned": 200,
+      "engine_ms": 23.227
+    },
+    {
+      "query": "5feceb",
+      "length": 6,
+      "ms": 2.221103000920266,
+      "returned": 1,
+      "engine_ms": 1.36793
+    },
+    {
+      "query": "a8054e",
+      "length": 6,
+      "ms": 2.7541780145838857,
+      "returned": 2,
+      "engine_ms": 2.01616
+    },
+    {
+      "query": "edbc46",
+      "length": 6,
+      "ms": 2.1207210374996066,
+      "returned": 2,
+      "engine_ms": 1.4847
+    },
+    {
+      "query": "c359ff",
+      "length": 6,
+      "ms": 1.861352997366339,
+      "returned": 2,
+      "engine_ms": 1.27035
+    },
+    {
+      "query": "418db3",
+      "length": 6,
+      "ms": 2.465187048073858,
+      "returned": 2,
+      "engine_ms": 1.67245
+    },
+    {
+      "query": "b46418",
+      "length": 6,
+      "ms": 2.2697169915772974,
+      "returned": 1,
+      "engine_ms": 1.69574
+    },
+    {
+      "query": "3857d5",
+      "length": 6,
+      "ms": 1.8781599937938154,
+      "returned": 2,
+      "engine_ms": 1.28707
+    },
+    {
+      "query": "bd61fb",
+      "length": 6,
+      "ms": 2.3110699839890003,
+      "returned": 1,
+      "engine_ms": 1.65634
+    },
+    {
+      "query": "412d91",
+      "length": 6,
+      "ms": 2.827850985340774,
+      "returned": 1,
+      "engine_ms": 2.03204
+    },
+    {
+      "query": "bcfd94",
+      "length": 6,
+      "ms": 1.6593449981883168,
+      "returned": 1,
+      "engine_ms": 1.12411
+    },
+    {
+      "query": "7fffd9",
+      "length": 6,
+      "ms": 1.6638219822198153,
+      "returned": 3,
+      "engine_ms": 1.09095
+    },
+    {
+      "query": "4a0da5",
+      "length": 6,
+      "ms": 1.8412320059724152,
+      "returned": 2,
+      "engine_ms": 1.28984
+    },
+    {
+      "query": "801432",
+      "length": 6,
+      "ms": 2.1926690242253244,
+      "returned": 4,
+      "engine_ms": 1.59215
+    },
+    {
+      "query": "aecd3f",
+      "length": 6,
+      "ms": 1.9817370339296758,
+      "returned": 2,
+      "engine_ms": 1.37294
+    },
+    {
+      "query": "61f166",
+      "length": 6,
+      "ms": 1.698775973636657,
+      "returned": 1,
+      "engine_ms": 1.18186
+    },
+    {
+      "query": "5f3c37",
+      "length": 6,
+      "ms": 1.9168280414305627,
+      "returned": 2,
+      "engine_ms": 1.2658
+    },
+    {
+      "query": "4cb432",
+      "length": 6,
+      "ms": 2.3581130080856383,
+      "returned": 4,
+      "engine_ms": 1.60789
+    },
+    {
+      "query": "9e1dbc",
+      "length": 6,
+      "ms": 1.6622580005787313,
+      "returned": 1,
+      "engine_ms": 1.17439
+    },
+    {
+      "query": "f96fe9",
+      "length": 6,
+      "ms": 1.8685940303839743,
+      "returned": 1,
+      "engine_ms": 1.29962
+    },
+    {
+      "query": "737389",
+      "length": 6,
+      "ms": 2.4468580377288163,
+      "returned": 2,
+      "engine_ms": 1.72084
+    },
+    {
+      "query": "3965ab",
+      "length": 6,
+      "ms": 2.039036015048623,
+      "returned": 1,
+      "engine_ms": 1.42988
+    },
+    {
+      "query": "65446b",
+      "length": 6,
+      "ms": 2.6315610157325864,
+      "returned": 1,
+      "engine_ms": 1.86158
+    },
+    {
+      "query": "809d6c",
+      "length": 6,
+      "ms": 3.109510987997055,
+      "returned": 1,
+      "engine_ms": 2.13493
+    },
+    {
+      "query": "eefb01",
+      "length": 6,
+      "ms": 2.9949970194138587,
+      "returned": 2,
+      "engine_ms": 1.64627
+    },
+    {
+      "query": "09df48",
+      "length": 6,
+      "ms": 2.184626995585859,
+      "returned": 1,
+      "engine_ms": 1.48321
+    },
+    {
+      "query": "0f2b6c",
+      "length": 6,
+      "ms": 1.9314909586682916,
+      "returned": 1,
+      "engine_ms": 1.30358
+    },
+    {
+      "query": "43303b",
+      "length": 6,
+      "ms": 2.165838028304279,
+      "returned": 1,
+      "engine_ms": 1.63568
+    },
+    {
+      "query": "0e4909",
+      "length": 6,
+      "ms": 2.1702360245399177,
+      "returned": 1,
+      "engine_ms": 1.64396
+    },
+    {
+      "query": "18cc0a",
+      "length": 6,
+      "ms": 2.4952020030468702,
+      "returned": 1,
+      "engine_ms": 1.41701
+    },
+    {
+      "query": "c22d97",
+      "length": 6,
+      "ms": 2.073017996735871,
+      "returned": 1,
+      "engine_ms": 1.19855
+    }
+  ],
+  "search_p95_ms_by_length": {
+    "3": 44.946570007596165,
+    "6": 2.9949970194138587
+  },
+  "broad_searches": [
+    {
+      "query": "item",
+      "ms": 1002.553140046075,
+      "ok": false,
+      "error": "search timed out; refine the query",
+      "returned": 0
+    },
+    {
+      "query": "dat",
+      "ms": 1003.0163629562594,
+      "ok": false,
+      "error": "search timed out; refine the query",
+      "returned": 0
+    },
+    {
+      "query": "it",
+      "ms": 834.827569022309,
+      "ok": true,
+      "error": null,
+      "returned": 200
+    }
+  ],
+  "idle_window_seconds": 10.000137314957101,
+  "idle_cpu_seconds": 0.01,
+  "idle_memory": {
+    "VmHWM": 51343360,
+    "VmRSS": 23199744
+  },
+  "database_bytes": 485396480,
+  "measured_at_utc": "2026-10-08T21:32:57Z",
+  "measurement_context": "Published v0.4.0 source build; no GTK launch instrumentation.",
+  "paths_normalized": true,
+  "mountinfo_filesystem": "ext4",
+  "storage_media": "unknown virtual block device"
+}

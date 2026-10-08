@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — 2026-10-08
+
+- Transactional schema 2→3 migration adds ordered filename pagination. Bounded FTS probes choose selective or broad-query plans; immediate-child listings explicitly use the parent index.
+- Per-root verify/snapshot recovery avoids changing unrelated root states; removing roots releases watches and queued work. Periodic safety reconciliation remains separate from normal incremental updates.
+- Reject overlapping root paths that conflict with global pathname ownership.
+- Persistent byte-safe bookmarks, Home/mount navigation, asynchronous file/folder opening and snapshot completion deadlines in GTK.
+- Real million-file scan/search/idle-memory/GTK-launch measurements with retained raw evidence; exact timings and filesystem gaps in docs/PERFORMANCE.md.
+- Native package upgrade gates install the published v0.4.0 build, populate index/history, then verify identity-preserving upgrades in Debian and Fedora.
+
 ## 0.4.0 — 2026-10-08
 
 - Transactional schema 1→2 migration preserves indexed entries and FTS.

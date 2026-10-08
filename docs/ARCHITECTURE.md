@@ -15,10 +15,10 @@ requests carry `code` and `error`. Embedded NUL in request strings is rejected.
 Invalid UTF-8 filenames use surrogateescape JSON (`\udc80` through `\udcff`).
 
 Commands currently implemented are status, roots, search, list, scan, verify,
-rebuild, config (read), and shutdown. Scan/verify/rebuild return a sequence;
+rebuild, config (read), config_save, mounts, treemap, history, snapshot and shutdown. Scan/verify/rebuild return a sequence;
 status's completed_seq is a FIFO completion watermark, not proof of success.
 Check roots' states and errors as well. Rebuild requires an explicit root ID.
-`list` currently selects descendants; immediate-child browsing is pending.
+`list` selects immediate children through the parent index.
 
 Startup marks cached roots Indexed (or Stale after an interrupted scan), then
 reconciles asynchronously. A database lock prevents two writers even when
@@ -44,7 +44,7 @@ all roots recover. Global recovery generations are consumed separately by each
 root, so an unrelated pending directory diff cannot hide lost events. Offline
 roots retain cached searchable entries with an Offline state. SIGKILL/restart
 reconciles offline edits and passes SQLite integrity checking. Special filesystem
-and mount namespace behavior still require dedicated validation. Million-entry measurements follow in the reliability release.
+and mount namespace behavior still require dedicated validation. Actual million-file measurements are recorded in [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Command-line client
 
@@ -52,7 +52,7 @@ and mount namespace behavior still require dedicated validation. Million-entry m
 
 ## GTK client
 
-The client links `th_base` and GTK, never the database engine. A GTask worker issues bounded IPC calls; the main thread updates a virtualized GtkColumnView backed by at most 200 records. One running request and one replacement request bound rapid typing work. Response generation numbers discard obsolete replies. Directory navigation stores indexed identities and byte paths. Search is debounced by GtkSearchEntry. Root state appears in sidebar and result status; refresh is explicit. A real Xvfb test browses a fixture and searches it through the daemon.
+The client links `th_base` and GTK, never the database engine. A GTask worker issues bounded IPC calls; the main thread updates a virtualized GtkColumnView backed by at most 200 records. One running request and one replacement request bound rapid typing work. Response generation numbers discard obsolete replies. Directory navigation stores indexed identities and byte paths. Search is debounced by GtkSearchEntry. Root state appears in sidebar and result status; refresh is explicit. Home, accessible mounts and up to 64 byte-safe bookmarks navigate through indexed directory identities. Opening files/folders uses asynchronous GIO. A real Xvfb test browses a fixture and searches it through the daemon.
 
 ## Treemap
 

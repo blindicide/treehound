@@ -17,3 +17,17 @@ build/treehound
 Use `-DTREEHOUND_BUILD_GUI=OFF` for a GTK-free CLI/daemon build, `-DTREEHOUND_BUILD_TESTS=OFF` to omit test dependencies, and `-DTREEHOUND_SANITIZE=ON` for ASan/UBSan. The GUI test is registered when both Xvfb and dbus-run-session are installed; CI installs both. Test fixtures use private temporary roots and never index your home.
 
 The GUI can start a sibling `treehoundd` on demand. Closing the window leaves the daemon running. This does not enable any systemd service. `treehoundd --help` documents explicit config/database/socket overrides.
+
+## Opt-in million-file benchmark
+
+```sh
+python3 tests/benchmarks/million.py build /path/to/isolated-output 1000000 initial
+```
+
+This creates one million actual files, launches the real daemon, queries its IPC,
+measures Linux process memory/CPU and runs ten GTK launches under Xvfb. It needs
+at least 1,002,000 free inodes and approximately 3 GB of space; fixtures, databases
+and JSON evidence remain available for inspection. Reusing an index name measures
+startup reconciliation; a new name measures initial indexing. Do not run competing
+heavy tests while measuring. See [PERFORMANCE.md](PERFORMANCE.md) for measured
+results and the limits of virtualized-host measurements.
