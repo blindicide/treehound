@@ -112,3 +112,11 @@ Roots must have disjoint path ownership. Treehound keeps logical bytes separate
 from `st_blocks * 512`; allocated totals do not measure unique physical storage
 under compression, shared extents or reflinks. GTK behavior is tested under
 Xvfb, not a physical desktop. These are explicit coverage gaps, not claimed passes.
+
+The benchmark records `database_bytes` as the main SQLite file only. New runs
+also record `database_files_bytes` and their sum `database_storage_bytes`,
+including live WAL and shared-memory sidecars before shutdown; checkpoints can
+change these sizes afterward. A real 1,000-file run measured 4,096 main-file
+bytes plus 869,352 WAL and 32,768 shared-memory bytes (906,216 total). The harness
+refuses an existing success/failure report name before scanning, preserving
+prior evidence. These reporting changes do not alter the release binaries.

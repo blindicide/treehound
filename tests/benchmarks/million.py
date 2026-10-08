@@ -11,6 +11,7 @@ base.mkdir(parents=True,exist_ok=True);root=base/'files';root.mkdir(exist_ok=Tru
 index_name=sys.argv[4] if len(sys.argv)>4 else 'index'
 assert index_name.isalnum(), 'index name must be alphanumeric'
 database=base/(index_name+'.db');initial_scan=not database.exists()
+assert not (base/(index_name+'-results.json')).exists() and not (base/(index_name+'-failed-results.json')).exists(), 'use a fresh report name; preserve previous evidence'
 space=os.statvfs(base)
 assert space.f_favail>count+2000 and space.f_bavail*space.f_frsize>count*2048, 'insufficient fixture space/inodes'
 t0=time.monotonic()
@@ -85,7 +86,9 @@ try:
         fields=pathlib.Path(f'/proc/{daemon.pid}/stat').read_text().rsplit(')',1)[1].split();return int(fields[11])+int(fields[12])
     cpu0=ticks();t0=time.monotonic();time.sleep(10);elapsed=time.monotonic()-t0
     report.update(idle_window_seconds=elapsed,idle_cpu_seconds=(ticks()-cpu0)/os.sysconf('SC_CLK_TCK'),idle_memory=memory())
-    report['database_bytes']=database.stat().st_size
+    report['database_bytes']=database.stat().st_size # main SQLite file, excluding WAL
+    report['database_files_bytes']={suffix or 'main':p.stat().st_size for suffix in ('','-wal','-shm') for p in [pathlib.Path(str(database)+suffix)] if p.exists()}
+    report['database_storage_bytes']=sum(report['database_files_bytes'].values())
     gui_samples=[]
     env=dict(os.environ,XDG_RUNTIME_DIR=str(runtime),XDG_CONFIG_HOME=str(base/'gui-config'),TREEHOUND_GUI_BENCHMARK='1',GTK_A11Y='none',GSK_RENDERER='cairo',GTK_USE_PORTAL='0',GSETTINGS_BACKEND='memory')
     for _ in range(10):
