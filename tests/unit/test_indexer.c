@@ -295,7 +295,7 @@ static void test_hardlink_subtree(void)
     const char *canonical = x.flags & TH_FLAG_LINKDUP ? b : a;
     const char *survivor = x.flags & TH_FLAG_LINKDUP ? "links/a/orig" : "links/b/hard";
     REQUIRE(unlink(canonical) == 0); free(dir); dir = th_xstrdup(root);
-    char *slash = strrchr(canonical, '/'); size_t length = (size_t)(slash - canonical);
+    const char *slash = strrchr(canonical, '/'); size_t length = (size_t)(slash - canonical);
     char *parent = th_xmemdup(canonical, length);
     CHECK_INT(th_scan_subtree(db, rid, parent, length, NULL, &st, &err), TH_SCAN_OK);
     REQUIRE(get(db, survivor, &e) == 1); CHECK(!(e.flags & TH_FLAG_LINKDUP)); CHECK_INT(e.size, 8192); th_entry_clear(&e);
