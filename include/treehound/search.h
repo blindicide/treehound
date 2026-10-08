@@ -30,6 +30,7 @@ typedef enum {
     TH_SORT_PATH = 1,
     TH_SORT_SIZE = 2, /* directories sort by their aggregate size */
     TH_SORT_MTIME = 3,
+    TH_SORT_TYPE = 4, /* entry type, then name */
 } th_sort_key;
 
 /* bit masks for th_search_opts.types */
@@ -51,6 +52,7 @@ typedef struct {
     int64_t offset;
     int64_t limit;     /* clamped to 1..TH_MAX_PAGE */
     bool want_total;   /* compute the total number of matches */
+    int timeout_ms;    /* responsiveness guard; 0: none */
 } th_search_opts;
 
 typedef struct {
@@ -59,11 +61,12 @@ typedef struct {
     int64_t total;   /* -1 when not computed */
     bool used_index; /* the FTS index narrowed the candidates */
     double elapsed_ms;
+    bool timed_out;  /* th_search() failed because timeout_ms elapsed */
 } th_search_result;
 
 void th_search_opts_init(th_search_opts *o);
 
-/* Parses a sort key name ("name", "path", "size", "mtime"); false if unknown. */
+/* Parses a sort key name ("name", "path", "size", "mtime", "type"); false if unknown. */
 bool th_sort_parse(const char *s, th_sort_key *out);
 const char *th_sort_name(th_sort_key k);
 

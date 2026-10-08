@@ -305,8 +305,20 @@ static void test_filters_and_sort(void)
         CHECK(strcmp(r.items[i - 1].path, r.items[i].path) < 0);
     th_search_result_free(&r);
 
+    th_search_opts_init(&o);
+    o.sort = TH_SORT_TYPE;
+    o.limit = TH_MAX_PAGE;
+    search(&o, &r);
+    for (size_t i = 1; i < r.n; i++)
+        CHECK(r.items[i - 1].type <= r.items[i].type);
+    REQUIRE(r.n > 0);
+    CHECK_INT(r.items[0].type, TH_TYPE_FILE);
+    CHECK_INT(r.items[r.n - 1].type, TH_TYPE_SYMLINK);
+    th_search_result_free(&r);
+
     th_sort_key k;
     CHECK(th_sort_parse("mtime", &k) && k == TH_SORT_MTIME);
+    CHECK(th_sort_parse("type", &k) && k == TH_SORT_TYPE);
     CHECK(!th_sort_parse("bogus", &k));
     CHECK_STR(th_sort_name(TH_SORT_SIZE), "size");
 }
@@ -406,6 +418,39 @@ static void test_crosscheck(void)
     sqlite3_finalize(all);
 }
 
+/* The guard interrupts long queries instead of letting them block the caller. */
+static void test_timeout(void)
+{
+    th_strbuf err;
+    th_sb_init(&err);
+    REQUIRE(th_db_exec(db,
+                       "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 300000) "
+                       "INSERT INTO entries(root_id, name, path, type) "
+                       "SELECT (SELECT min(id) FROM roots), 'bulk' || i, '/bulk/' || i, 0 FROM n") == 0);
+    th_search_opts o;
+    th_search_opts_init(&o);
+    o.query = "*u*k*";
+    o.sort = TH_SORT_NAME;
+    o.want_total = true;
+    o.timeout_ms = 1;
+    th_search_result r;
+    th_sb_reset(&err);
+    CHECK(th_search(db, &o, &r, &err) == -1);
+    CHECK(r.timed_out);
+    CHECK(strstr(err.data, "timed out") != NULL);
+    CHECK(r.n == 0 && r.items == NULL);
+
+    o.timeout_ms = 60000;
+    th_sb_reset(&err);
+    CHECK(th_search(db, &o, &r, &err) == 0);
+    CHECK(!r.timed_out);
+    CHECK_INT(r.total, 300000);
+    th_search_result_free(&r);
+
+    CHECK(th_db_exec(db, "DELETE FROM entries WHERE path >= '/bulk/' AND path < '/bulk0'") == 0);
+    th_sb_free(&err);
+}
+
 int main(void)
 {
     have_utf8_locale = setlocale(LC_CTYPE, "C.UTF-8") != NULL;
@@ -419,6 +464,7 @@ int main(void)
     RUN(test_filters_and_sort);
     RUN(test_pagination);
     RUN(test_crosscheck);
+    RUN(test_timeout);
     th_db_close(db);
     rm_tree(tmpdir);
     rm_tree(dbdir);

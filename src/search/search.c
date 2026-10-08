@@ -44,7 +44,7 @@ void th_search_opts_init(th_search_opts *o)
     o->sort = TH_SORT_NAME;
 }
 
-static const char *const sort_names[] = {"name", "path", "size", "mtime"};
+static const char *const sort_names[] = {"name", "path", "size", "mtime", "type"};
 
 bool th_sort_parse(const char *s, th_sort_key *out)
 {
@@ -196,6 +196,9 @@ static void order_clause(th_strbuf *sql, th_sort_key k, bool desc)
     case TH_SORT_MTIME:
         th_sb_printf(sql, " ORDER BY e.mtime %s, e.path ASC", dir);
         break;
+    case TH_SORT_TYPE:
+        th_sb_printf(sql, " ORDER BY e.type %s, e.name COLLATE NOCASE %s, e.path ASC", dir, dir);
+        break;
     case TH_SORT_NAME:
     default:
         th_sb_printf(sql, " ORDER BY e.name COLLATE NOCASE %s, e.name %s, e.path ASC", dir, dir);
@@ -203,9 +206,25 @@ static void order_clause(th_strbuf *sql, th_sort_key k, bool desc)
     }
 }
 
+static int deadline_cb(void *ud)
+{
+    return th_mono_sec() > *(const double *)ud;
+}
+
+static void report_error(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_strbuf *err)
+{
+    if (o->timeout_ms > 0 && sqlite3_errcode(db) == SQLITE_INTERRUPT) {
+        res->timed_out = true;
+        th_sb_puts(err, "search timed out; refine the query");
+        return;
+    }
+    th_sb_printf(err, "search: %s", sqlite3_errmsg(db));
+}
+
 int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_strbuf *err)
 {
     double t0 = th_mono_sec();
+    double deadline = t0 + o->timeout_ms / 1000.0;
     memset(res, 0, sizeof *res);
     res->total = -1;
 
@@ -291,6 +310,8 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
     th_sb_puts(&sql, " LIMIT ? OFFSET ?");
 
     int rc = -1;
+    if (o->timeout_ms > 0)
+        sqlite3_progress_handler(db, 1000, deadline_cb, &deadline);
     sqlite3_stmt *st = th_db_prepare(db, sql.data);
     if (!st) {
         th_sb_printf(err, "search: %s", sqlite3_errmsg(db));
@@ -310,7 +331,7 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
         th_entry_from_stmt(&res->items[res->n++], st, 0);
     }
     if (s != SQLITE_DONE) {
-        th_sb_printf(err, "search: %s", sqlite3_errmsg(db));
+        report_error(db, o, res, err);
         sqlite3_finalize(st);
         th_search_result_free(res);
         goto out;
@@ -331,14 +352,20 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
                 goto out;
             }
             bind_all(st, &params);
-            if (sqlite3_step(st) == SQLITE_ROW)
+            s = sqlite3_step(st);
+            if (s == SQLITE_ROW) {
                 res->total = sqlite3_column_int64(st, 0);
+            } else if (sqlite3_errcode(db) == SQLITE_INTERRUPT) {
+                res->total = -1; /* counting is best effort under the guard */
+            }
             sqlite3_finalize(st);
         }
     }
     rc = 0;
 
 out:
+    if (o->timeout_ms > 0)
+        sqlite3_progress_handler(db, 0, NULL, NULL);
     res->elapsed_ms = (th_mono_sec() - t0) * 1000.0;
     th_sb_free(&fts);
     th_sb_free(&where);
