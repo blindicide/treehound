@@ -70,6 +70,8 @@ static const char *const migrations[] = {
     "CREATE TABLE snapshots(id INTEGER PRIMARY KEY, root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE, captured_at INTEGER NOT NULL, size INTEGER NOT NULL, allocated INTEGER NOT NULL, files INTEGER NOT NULL, directories INTEGER NOT NULL);"
     "CREATE INDEX snapshots_root ON snapshots(root_id,id);"
     "CREATE TABLE snapshot_dirs(snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,path TEXT NOT NULL,size INTEGER NOT NULL,allocated INTEGER NOT NULL,PRIMARY KEY(snapshot_id,path)) WITHOUT ROWID;",
+    /* 2 -> 3: ordered pagination without sorting every filename match. */
+    "CREATE INDEX entries_name ON entries(name COLLATE NOCASE,name,path);",
 };
 
 _Static_assert(TH_ARRAY_LEN(migrations) == TH_SCHEMA_VERSION, "one migration per schema version");

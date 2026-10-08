@@ -252,12 +252,23 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
     param_list params = {.n = 0};
 
     fts_query_terms(&terms, &fts);
-    th_sb_puts(&where, " WHERE 1");
-    if (fts.len) {
-        th_sb_puts(&where, " AND e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)");
-        push_text(&params, fts.data, fts.len);
-        res->used_index = true;
+    /* Probe only a bounded posting prefix. Broad matches can then stream the
+     * ordered filename index, testing FTS membership per candidate instead of
+     * materializing and sorting a million rowids before returning one page. */
+    bool broad = false;
+    if (o->timeout_ms > 0)
+        sqlite3_progress_handler(db, 1000, deadline_cb, &deadline);
+    if (fts.len && o->sort == TH_SORT_NAME && !o->want_total) {
+        sqlite3_stmt *probe = th_db_prepare(db,"SELECT rowid FROM entries_fts WHERE entries_fts MATCH ? LIMIT 4097");
+        if (probe) {
+            th_bind_bytes(probe,1,fts.data,fts.len);
+            int n = 0;
+            while (n < 4097 && sqlite3_step(probe) == SQLITE_ROW) n++;
+            broad = n == 4097;
+            sqlite3_finalize(probe);
+        }
     }
+    th_sb_puts(&where, " WHERE 1");
     for (size_t i = 0; i < terms.n; i++) {
         th_sb_printf(&where, " AND %sth_match(?, e.%s, ?)", terms.v[i].neg ? "NOT " : "",
                      terms.v[i].path ? "path" : "name");
@@ -323,12 +334,19 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
         push_text(&params, hi.data, hi.len);
     }
 
+    if (fts.len) {
+        th_sb_puts(&where, broad ? " AND EXISTS (SELECT 1 FROM entries_fts WHERE rowid=e.id AND entries_fts MATCH ?)" : " AND e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)");
+        push_text(&params, fts.data, fts.len);
+        res->used_index = true;
+    }
+
     int64_t limit = o->limit;
     if (limit <= 0 || limit > TH_MAX_PAGE)
         limit = limit <= 0 ? 100 : TH_MAX_PAGE;
     int64_t offset = o->offset > 0 ? o->offset : 0;
 
     th_sb_puts(&sql, "SELECT " TH_ENTRY_COLS " FROM entries e");
+    if(o->parent_id>=0)th_sb_puts(&sql," INDEXED BY entries_parent");
     th_sb_append(&sql, where.data, where.len);
     order_clause(&sql, o->sort, o->descending);
     th_sb_puts(&sql, " LIMIT ? OFFSET ?");
@@ -368,6 +386,7 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
         } else {
             th_sb_reset(&sql);
             th_sb_puts(&sql, "SELECT count(*) FROM entries e");
+            if(o->parent_id>=0)th_sb_puts(&sql," INDEXED BY entries_parent");
             th_sb_append(&sql, where.data, where.len);
             st = th_db_prepare(db, sql.data);
             if (!st) {

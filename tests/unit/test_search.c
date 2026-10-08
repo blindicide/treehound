@@ -448,6 +448,19 @@ static void test_timeout(void)
     CHECK_INT(r.total, 300000);
     th_search_result_free(&r);
 
+    /* Broad FTS posting lists still return ordered, filtered pages. */
+    o.query = "bulk"; o.want_total = false; o.limit = 3; o.offset = 1;
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK(r.used_index); CHECK_INT(r.n,3);
+    CHECK_STR(r.items[0].name,"bulk10"); CHECK_STR(r.items[1].name,"bulk100");
+    th_search_result_free(&r);
+    o.descending = true; o.offset = 0;
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK_STR(r.items[0].name,"bulk99999"); th_search_result_free(&r);
+    o.descending = false; o.under = "/absent";
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK_INT(r.n,0); th_search_result_free(&r);
+
     CHECK(th_db_exec(db, "DELETE FROM entries WHERE path >= '/bulk/' AND path < '/bulk0'") == 0);
     th_sb_free(&err);
 }

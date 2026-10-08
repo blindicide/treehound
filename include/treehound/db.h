@@ -22,7 +22,7 @@
  * prefix ranges over `path` select exactly one subtree.
  */
 
-#define TH_SCHEMA_VERSION 2
+#define TH_SCHEMA_VERSION 3
 
 /* Column list matching th_entry_from_stmt(). */
 #define TH_ENTRY_COLS                                                                    \

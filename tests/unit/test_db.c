@@ -78,8 +78,8 @@ static void test_history_migration(void)
     int64_t root=th_db_root_ensure(db,"/history");int64_t top=ADD(db,root,0,"history","/history",TH_TYPE_DIR,0);
     CHECK_INT(th_db_exec(db,"UPDATE roots SET entry_id=1,state=1; UPDATE entries SET agg_size=10,agg_alloc=4096"),0);
     /* Recreate the genuine version-1 topology with indexed data and FTS. */
-    CHECK_INT(top,1);CHECK_INT(th_db_exec(db,"DROP TABLE snapshot_dirs; DROP TABLE snapshots; PRAGMA user_version=1"),0);th_db_close(db);
-    db=th_db_open(p,false,&err);REQUIRE(db);CHECK_INT(th_db_schema_version(db),2);CHECK_INT(th_db_entry_count(db),1);
+    CHECK_INT(top,1);CHECK_INT(th_db_exec(db,"DROP TABLE snapshot_dirs; DROP TABLE snapshots; DROP INDEX entries_name; PRAGMA user_version=1"),0);th_db_close(db);
+    db=th_db_open(p,false,&err);REQUIRE(db);CHECK_INT(th_db_schema_version(db),TH_SCHEMA_VERSION);CHECK_INT(th_db_entry_count(db),1);
     CHECK_INT(th_history_capture(db,root,2,100000,true),0);
     CHECK_INT(th_history_capture(db,root,2,100001,false),0);
     CHECK_INT(th_db_exec(db,"UPDATE entries SET agg_size=25"),0);
@@ -92,7 +92,7 @@ static void test_history_migration(void)
     CHECK_INT(th_db_root_delete(db,root),0);q=th_db_prepare(db,"SELECT count(*) FROM snapshot_dirs");REQUIRE(q);CHECK_INT(sqlite3_step(q),SQLITE_ROW);CHECK_INT(sqlite3_column_int(q,0),0);sqlite3_finalize(q);
     CHECK_INT(th_db_check(db,true,&err),0);
     /* Conflicting migration fails transactionally without advancing version. */
-    CHECK_INT(th_db_meta_set(db,"keep","yes"),0);CHECK_INT(th_db_exec(db,"DROP TABLE snapshot_dirs; PRAGMA user_version=1"),0);CHECK_INT(th_db_migrate(db,&err),-1);CHECK_INT(th_db_schema_version(db),1);char *value=th_db_meta_get(db,"keep");CHECK_STR(value,"yes");free(value);
+    CHECK_INT(th_db_meta_set(db,"keep","yes"),0);CHECK_INT(th_db_exec(db,"DROP TABLE snapshot_dirs; DROP INDEX entries_name; PRAGMA user_version=1"),0);CHECK_INT(th_db_migrate(db,&err),-1);CHECK_INT(th_db_schema_version(db),1);char *value=th_db_meta_get(db,"keep");CHECK_STR(value,"yes");free(value);
     CHECK_INT(th_db_exec(db,"DROP TABLE snapshots"),0);CHECK_INT(th_db_migrate(db,&err),0);th_db_close(db);th_sb_free(&err);free(p);
 }
 

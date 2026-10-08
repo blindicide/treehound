@@ -1,6 +1,6 @@
 # Database
 
-SQLite schema revision 2 is authoritative in `include/treehound/db.h`.
+SQLite schema revision 3 is authoritative in `include/treehound/db.h`.
 `th_db_open` creates/migrates transactionally and rejects newer schema versions.
 The daemon enables WAL; GUI and CLI must use IPC, never open the database.
 
@@ -36,3 +36,12 @@ compare only paths recorded in both captures. Renames, newly added/deleted
 paths and directories outside this coverage have no inferred directory delta.
 Root totals remain complete subject to the index's documented size semantics.
 IPC returns at most 365 ordered captures and 20 common-path changes.
+
+Schema 2→3 adds the ordered `(name COLLATE NOCASE, name, path)` index.
+Broad name-sorted searches probe at most 4,097 FTS postings, then test FTS
+membership while streaming the ordered index. Selective searches keep the
+rowid-driven plan; optional total-count requests use that plan as well. All
+matching and filters still run exactly, with the one-second IPC query guard.
+
+Immediate-child listings explicitly use `entries_parent`; choosing the root
+index on a million-entry root otherwise scans unrelated descendants.
