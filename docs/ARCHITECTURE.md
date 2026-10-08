@@ -26,7 +26,19 @@ configured with different sockets. SIGTERM/SIGINT cancel scanning and drain
 connections before joining the writer. SQLite WAL provides crash recovery.
 No service is enabled automatically.
 
-Current development increment: scanning and IPC are tested; live monitoring,
-CLI/GTK client, visual analysis, history, CI and release packaging are pending.
-A completed scan currently means a point-in-time filesystem reconciliation,
-not continuous monitoring coverage. This increment is not a finished release.
+Inotify watches are installed before directory enumeration. The event reader
+coalesces at most 4,096 dirty directories and queues writer jobs. Event diffs
+visit affected directories and newly discovered subtrees, preserving unchanged
+subtrees. Same-root paired moves update raw-byte paths and parent relations in
+SQL, preserving descendant IDs and watch paths. Unpaired moves converge through
+parent diffs. Overflow, unmount and dirty-queue exhaustion request whole-root
+reconciliation; watch failures and enumeration errors leave roots Stale with
+warnings. No watch limits are changed. Periodic reconciliation is a configurable
+safety net, not the normal live-update path. The event thread blocks on inotify
+and an explicit shutdown eventfd. Search replies inherit root consistency state.
+
+Current development increment: daemon scanning, IPC, live updates and restart
+reconciliation are tested. CLI/GTK client, visual analysis, history, CI and
+release packaging remain pending. Kernel overflow, special filesystems and
+mount namespace behavior still need dedicated validation. This increment is
+not a finished release.

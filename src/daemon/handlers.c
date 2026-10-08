@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "daemon.h"
+#include "monitor.h"
 #include "treehound/common.h"
 #include "treehound/db.h"
 #include "treehound/match.h"
@@ -16,7 +17,7 @@ static void failure(th_strbuf *out, const char *code, const char *error)
     th_jw_kv_int(&w, "v", TH_PROTOCOL_VERSION); th_jw_kv_bool(&w, "ok", false);
     th_jw_kv_str(&w, "code", code); th_jw_kv_str(&w, "error", error); th_jw_obj_end(&w);
 }
-static void entry_json(th_jw *w, const th_entry *e)
+static void entry_json(th_jw *w, const th_entry *e, int state)
 {
     th_jw_obj_begin(w);
     th_jw_kv_int(w, "id", e->id); th_jw_kv_int(w, "parent_id", e->parent_id);
@@ -27,7 +28,7 @@ static void entry_json(th_jw *w, const th_entry *e)
     th_jw_kv_int(w, "allocated", e->type == TH_TYPE_DIR ? e->agg_alloc : e->alloc);
     th_jw_kv_int(w, "files", e->agg_files); th_jw_kv_int(w, "directories", e->agg_dirs);
     th_jw_kv_int(w, "mtime", e->mtime); th_jw_kv_int(w, "flags", e->flags);
-    th_jw_kv_str(w, "status", th_state_name(e->state)); th_jw_obj_end(w);
+    th_jw_kv_str(w, "status", th_state_name(state)); th_jw_obj_end(w);
 }
 static bool valid_strings(const th_jval *v)
 {
@@ -58,7 +59,7 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
         th_jw_kv_int(&w, "uptime", th_now() - d->started_at);
         th_jw_kv_int(&w, "scanned_entries", d->current_stats.entries);
         th_jw_kv_str(&w, "current_path", d->current_path ? d->current_path : "");
-        th_jw_kv_bool(&w, "live_indexing", false);
+        th_jw_kv_bool(&w, "live_indexing", monitor_enabled());
         pthread_mutex_unlock(&d->mu);
         th_jw_kv_int(&w, "entries", th_db_entry_count(*db));
     } else if (!strcmp(cmd, "roots")) {
@@ -68,7 +69,7 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
         for (size_t i = 0; i < n; i++) {
             th_root *r = &roots[i]; th_jw_obj_begin(&w);
             th_jw_kv_int(&w, "id", r->id); th_jw_kv_int(&w, "entry_id", r->entry_id);
-            th_jw_kv_str(&w, "path", r->path); th_jw_kv_str(&w, "status", th_state_name(r->state));
+            th_jw_kv_str(&w, "path", r->path); th_jw_kv_str(&w, "status", th_state_name(monitor_pending(r->id) && r->state == TH_STATE_VERIFIED ? TH_STATE_UPDATING : r->state));
             th_jw_kv_str(&w, "error", r->error ? r->error : "");
             th_jw_kv_int(&w, "size", r->total_size); th_jw_kv_int(&w, "allocated", r->total_alloc);
             th_jw_kv_int(&w, "files", r->total_files); th_jw_kv_int(&w, "directories", r->total_dirs);
@@ -99,7 +100,16 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
         th_jw_kv_int(&w, "total", r.total); th_jw_kv_bool(&w, "used_index", r.used_index);
         th_jw_kv_double(&w, "elapsed_ms", r.elapsed_ms);
         th_jw_key(&w, "items"); th_jw_arr_begin(&w);
-        for (size_t i = 0; i < r.n; i++) entry_json(&w, &r.items[i]);
+        int64_t last_root = -1; int state = TH_STATE_INDEXED;
+        for (size_t i = 0; i < r.n; i++) {
+            if (r.items[i].root_id != last_root) {
+                th_root root = {0}; last_root = r.items[i].root_id;
+                if (th_db_root_get(*db, last_root, &root) == 1) state = root.state;
+                th_root_clear(&root);
+                if (monitor_pending(last_root) && state == TH_STATE_VERIFIED) state = TH_STATE_UPDATING;
+            }
+            entry_json(&w, &r.items[i], state);
+        }
         th_jw_arr_end(&w); th_search_result_free(&r);
     } else if (!strcmp(cmd, "scan") || !strcmp(cmd, "verify") || !strcmp(cmd, "rebuild")) {
         int64_t id = th_json_get_int(q, "root_id", 0);
@@ -109,6 +119,7 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
             if (found != 1) { failure(out, "request", "unknown root_id"); goto done; }
         }
         /* FIFO only: the preserved scanner's completion watermark assumes this ordering. */
+        monitor_force(id);
         uint64_t seq = id ? daemon_enqueue(d, !strcmp(cmd, "rebuild") ? JOB_REBUILD : JOB_SCAN, id, false) : daemon_enqueue_all(d, *db);
         th_jw_kv_int(&w, "seq", (int64_t)seq);
     } else if (!strcmp(cmd, "config")) {

@@ -608,9 +608,9 @@ static int sync_child(scan_ctx *c, const work_item *w, dev_t dev, const fs_child
         return -1;
     }
     if (type == TH_TYPE_DIR) {
-        if (descend)
+        if (descend && (!c->o || !c->o->shallow || !d))
             push(c, id, c->child.data, c->child.len, false);
-        else if (d && delete_below(c, c->child.data, c->child.len) != 0)
+        else if (!descend && d && delete_below(c, c->child.data, c->child.len) != 0)
             return -1;
     }
     return 0;
@@ -652,6 +652,8 @@ static int scan_one_dir(scan_ctx *c, const work_item *w)
         close(fd);
         return -1;
     }
+    if (c->o && c->o->on_dir)
+        c->o->on_dir(w->id, w->path, w->len, c->o->ud);
     fs_child *fs = NULL;
     size_t nfs = 0;
     if (read_fs_children(c, fd, w->path, w->len, &fs, &nfs) != 0) {
@@ -659,9 +661,6 @@ static int scan_one_dir(scan_ctx *c, const work_item *w)
         return 0;
     }
     c->st->dirs++;
-    if (c->o && c->o->on_dir)
-        c->o->on_dir(w->id, w->path, w->len, c->o->ud);
-
     db_child *db = NULL;
     size_t ndb = 0;
     int rc = load_db_children(c, w->id, &db, &ndb);

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "daemon.h"
+#include "monitor.h"
 #include "treehound/common.h"
 #include "treehound/db.h"
 #include "treehound/ipc.h"
@@ -119,6 +120,7 @@ int main(int argc, char **argv)
     if (listener < 0) { fprintf(stderr, "%s\n", err.data); return early_exit(&d, &err, sigfd, lockfd, TH_EXIT_UNAVAILABLE); }
     d.wake_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     d.started_at = d.last_reconcile = th_now();
+    if (monitor_start(&d) != 0) th_log(TH_LOG_WARN, "live monitoring unavailable");
     daemon_enqueue_all(&d, d.wdb);
     pthread_t scanner;
     if (d.wake_fd < 0 || scanner_start(&d, &scanner) != 0) return TH_EXIT_FAILED;
@@ -147,6 +149,7 @@ int main(int argc, char **argv)
     while (d.nconn) pthread_cond_wait(&d.conn_cv, &d.mu);
     pthread_mutex_unlock(&d.mu);
     pthread_join(scanner, NULL);
+    monitor_stop();
     close(listener); unlink(d.socket_path); close(sigfd); close(d.wake_fd);
     th_db_close(d.wdb); close(lockfd);
     th_config_free(&d.cfg); free(d.queue); free(d.current_path);

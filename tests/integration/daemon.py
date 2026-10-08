@@ -69,9 +69,34 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
     finally:
         proc.terminate(); assert proc.wait(timeout=5) == 0
     (root / "offline.txt").write_bytes(b"offline change")
+    cfg.write_text(f"root = {root}\nwatch = true\nreconcile_interval_hours = 0\n")
     proc = start()
+    def eventually(query, count):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            result = call("search", query=query)["items"]
+            if len(result) == count: return result
+            time.sleep(.02)
+        raise AssertionError(f"live query {query}: expected {count}, got {result}")
     try:
+        assert call("status")["live_indexing"]
         assert call("search", query="offline")["items"]
+        (root / "live.txt").write_bytes(b"live")
+        assert eventually("live.txt", 1)[0]["size"] == 4
+        (root / "live.txt").write_bytes(b"longer live data")
+        deadline = time.monotonic() + 10
+        while call("search", query="live.txt")["items"][0]["size"] != 16:
+            assert time.monotonic() < deadline
+            time.sleep(.02)
+        (root / "newdir").mkdir()
+        (root / "newdir" / "nested.txt").write_bytes(b"nested")
+        nested_id = eventually("nested.txt", 1)[0]["id"]
+        (root / "newdir").rename(root / "moved")
+        assert eventually(str(root / "moved" / "nested.txt"), 1)[0]["id"] == nested_id
+        (root / "moved" / "nested.txt").unlink()
+        eventually("nested.txt", 0)
+        (root / "live.txt").unlink()
+        eventually("live.txt", 0)
         seq = call("rebuild", root_id=roots[0]["id"])["seq"]
         assert wait_idle()["completed_seq"] >= seq
         assert call("search", query="offline")["items"]

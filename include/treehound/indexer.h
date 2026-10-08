@@ -45,6 +45,7 @@ typedef struct {
     th_scan_dir_fn on_dir;
     void *ud;               /* passed to progress and on_dir */
     unsigned progress_ms;   /* minimum interval between progress calls; 0 = 250 */
+    bool shallow;          /* event diff: descend only newly discovered directories */
     size_t batch_rows;      /* writes per transaction; 0 = 10000 */
 } th_scan_opts;
 

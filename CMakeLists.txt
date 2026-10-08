@@ -62,7 +62,7 @@ add_library(th_engine STATIC
 )
 target_link_libraries(th_engine PUBLIC th_base SQLite::SQLite3 Threads::Threads)
 
-add_executable(treehoundd src/daemon/main.c src/daemon/handlers.c src/daemon/scanner.c)
+add_executable(treehoundd src/daemon/main.c src/daemon/handlers.c src/daemon/scanner_runtime.c src/daemon/monitor.c)
 target_link_libraries(treehoundd PRIVATE th_engine)
 install(TARGETS treehoundd RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
