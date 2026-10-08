@@ -52,13 +52,13 @@ jobs:
           cd ..
           package=$(find build -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \))
           if [[ '${{ matrix.format }}' == DEB ]]; then
-            previous=treehound_0.4.0_amd64.deb
+            previous=treehound_0.5.0_amd64.deb
           else
-            previous=treehound-0.4.0-1.x86_64.rpm
+            previous=treehound-0.5.0-1.x86_64.rpm
           fi
           mkdir -p build-previous
-          curl --fail --location --retry 3 "https://github.com/blindicide/treehound/releases/download/v0.4.0/$previous" -o "build-previous/$previous"
-          curl --fail --location --retry 3 "https://github.com/blindicide/treehound/releases/download/v0.4.0/SHA256SUMS" -o build-previous/SHA256SUMS
+          curl --fail --location --retry 3 "https://github.com/blindicide/treehound/releases/download/v0.5.0/$previous" -o "build-previous/$previous"
+          curl --fail --location --retry 3 "https://github.com/blindicide/treehound/releases/download/v0.5.0/SHA256SUMS" -o build-previous/SHA256SUMS
           (cd build-previous && sha256sum --check --ignore-missing SHA256SUMS)
           bash scripts/validate-package.sh '${{ matrix.format }}' "$package" '${{ steps.version.outputs.value }}' "build-previous/$previous"
           mkdir -p artifacts
