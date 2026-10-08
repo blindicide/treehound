@@ -585,6 +585,7 @@ static int read_fs_children(scan_ctx *c, int fd, const char *dir, size_t dlen, f
     fs_child *v = NULL;
     size_t n = 0, cap = 0;
     struct dirent *de;
+    bool incomplete = false;
     errno = 0;
     while ((de = readdir(d)) != NULL) {
         const char *nm = de->d_name;
@@ -593,7 +594,7 @@ static int read_fs_children(scan_ctx *c, int fd, const char *dir, size_t dlen, f
         struct stat s;
         if (fstatat(dirfd(d), nm, &s, AT_SYMLINK_NOFOLLOW) != 0) {
             if (errno != ENOENT)
-                c->st->errors++;
+                incomplete = true;
             errno = 0;
             continue;
         }
@@ -615,8 +616,10 @@ static int read_fs_children(scan_ctx *c, int fd, const char *dir, size_t dlen, f
     }
     int e = errno;
     closedir(d);
-    if (e != 0)
-        c->st->errors++;
+    if (e != 0 || incomplete) {
+        free_fs(v, n);
+        return -1;
+    }
     if (n > 1)
         qsort(v, n, sizeof *v, cmp_fs);
     *out = v;

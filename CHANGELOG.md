@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A metadata or directory-read I/O failure retains cached children instead of interpreting partial enumeration as deletion. A syscall-injected restart/recovery regression runs without privileges; permission-denial checks explicitly skip privileged package-test UIDs.
+
 - Parent reconciliation preserves same-parent directory/descendant identity when it observes a rename before the inotify pair reaches the writer. Bounded inode lookup and byte-safe path updates avoid a recursive rescan; tests cover both sort directions and Unicode ancestors.
 
 - Enumeration gaps remain Stale across unrelated successful edits. Only a complete full verification clears them; real permission-denial/recovery coverage retains cached records and prevents false certification.

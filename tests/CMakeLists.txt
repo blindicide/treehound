@@ -31,7 +31,11 @@ endif()
 add_executable(treehoundd_watchfault ../src/daemon/main.c ../src/daemon/handlers.c
     ../src/daemon/scanner_runtime.c ../src/daemon/monitor.c integration/watch_fault.c)
 target_link_libraries(treehoundd_watchfault PRIVATE th_engine)
-target_link_options(treehoundd_watchfault PRIVATE -Wl,--wrap=inotify_add_watch)
+target_link_options(treehoundd_watchfault PRIVATE -Wl,--wrap=inotify_add_watch -Wl,--wrap=fstatat64)
 add_test(NAME integration.watch_fault COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/integration/watch_fault.py $<TARGET_FILE:treehoundd_watchfault>)
 set_tests_properties(integration.watch_fault PROPERTIES LABELS integration TIMEOUT 20)
+
+add_test(NAME integration.scan_fault COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/integration/scan_fault.py $<TARGET_FILE:treehoundd_watchfault>)
+set_tests_properties(integration.scan_fault PROPERTIES LABELS integration TIMEOUT 20)
