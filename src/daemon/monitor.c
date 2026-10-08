@@ -232,11 +232,30 @@ static int apply_move(sqlite3 *db, const move *mv)
     th_subtree_range(mv->from, strlen(mv->from), &lo, &hi);
     int rc = -1;
     if (th_db_begin(db) == 0) {
-        sqlite3_stmt *q = th_db_prepare(db,
+        /* rename(2) may replace an existing pathname. Remove its old identity
+         * in the same transaction before moving the source into that name. */
+        th_strbuf target_lo, target_hi;
+        th_sb_init(&target_lo); th_sb_init(&target_hi);
+        th_subtree_range(mv->to, strlen(mv->to), &target_lo, &target_hi);
+        sqlite3_stmt *remove = th_db_prepare(db,
+            "DELETE FROM entries WHERE root_id=?1 AND id<>?2 AND "
+            "(path=?3 OR (path>=?4 AND path<?5))");
+        bool removed = false;
+        if (remove) {
+            sqlite3_bind_int64(remove, 1, mv->root);
+            sqlite3_bind_int64(remove, 2, src.id);
+            th_bind_str(remove, 3, mv->to);
+            th_bind_bytes(remove, 4, target_lo.data, target_lo.len);
+            th_bind_bytes(remove, 5, target_hi.data, target_hi.len);
+            removed = sqlite3_step(remove) == SQLITE_DONE;
+            sqlite3_finalize(remove);
+        }
+        th_sb_free(&target_lo); th_sb_free(&target_hi);
+        sqlite3_stmt *q = removed ? th_db_prepare(db,
             "UPDATE entries SET path=CAST(?1 || substr(CAST(path AS BLOB),?2) AS TEXT), "
             "name=CASE WHEN id=?3 THEN ?4 ELSE name END, "
             "parent_id=CASE WHEN id=?3 THEN ?5 ELSE parent_id END "
-            "WHERE root_id=?6 AND (id=?3 OR (path>=?7 AND path<?8))");
+            "WHERE root_id=?6 AND (id=?3 OR (path>=?7 AND path<?8))") : NULL;
         if (q) {
             th_bind_str(q, 1, mv->to); sqlite3_bind_int64(q, 2, (int64_t)strlen(mv->from) + 1);
             sqlite3_bind_int64(q, 3, src.id); th_bind_str(q, 4, strrchr(mv->to, '/') + 1);

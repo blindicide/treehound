@@ -30,7 +30,8 @@ Inotify watches are installed before directory enumeration. The event reader
 coalesces at most 4,096 dirty directories and queues writer jobs. Event diffs
 visit affected directories and newly discovered subtrees, preserving unchanged
 subtrees. Same-root paired moves update raw-byte paths and parent relations in
-SQL, preserving descendant IDs and watch paths. Unpaired moves converge through
+SQL, preserving descendant IDs and watch paths. Atomic replacements delete the
+old destination inside the same transaction before moving the source. Unpaired moves converge through
 parent diffs. Overflow, unmount and dirty-queue exhaustion request whole-root
 reconciliation; watch failures and enumeration errors leave roots Stale with
 warnings. No watch limits are changed. Periodic reconciliation is a configurable

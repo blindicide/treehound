@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Atomic same-root file and directory replacements now preserve the moved source and descendant identities, deleting the replaced destination within the move transaction. Real inotify regression covers both cases.
+
 ## 0.5.0 — 2026-10-08
 
 - Transactional schema 2→3 migration adds ordered filename pagination. Bounded FTS probes choose selective or broad-query plans; immediate-child listings explicitly use the parent index.

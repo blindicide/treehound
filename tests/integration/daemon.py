@@ -145,7 +145,34 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         wait_idle()  # Finish creation reconciliation before testing the paired move.
         (root / "newdir").rename(root / "moved")
         assert eventually(str(root / "moved" / "nested.txt"), 1)[0]["id"] == nested_id
-        (root / "moved" / "nested.txt").unlink()
+        # Atomic replacement must preserve the source identity, not the replaced
+        # destination's ID. Pause the process so both rename halves are queued.
+        source = root / "replace-source.txt"
+        target = root / "replace-target.txt"
+        source.write_bytes(b"source payload")
+        target.write_bytes(b"old target")
+        source_id = eventually("replace-source.txt", 1)[0]["id"]
+        target_id = eventually("replace-target.txt", 1)[0]["id"]
+        wait_idle()
+        proc.send_signal(signal.SIGSTOP)
+        try: os.replace(source, target)
+        finally: proc.send_signal(signal.SIGCONT)
+        eventually("replace-source.txt", 0)
+        replaced = eventually("replace-target.txt", 1)[0]
+        assert replaced["id"] == source_id and replaced["id"] != target_id, replaced
+        assert replaced["size"] == len(b"source payload"), replaced
+        # Replacing an empty destination directory also preserves descendants.
+        empty_target = root / "directory-target"
+        empty_target.mkdir()
+        eventually(str(empty_target), 1); wait_idle()
+        moved_id = call("search", query=str(root / "moved"), exact=True)["items"][0]["id"]
+        proc.send_signal(signal.SIGSTOP)
+        try: os.replace(root / "moved", empty_target)
+        finally: proc.send_signal(signal.SIGCONT)
+        eventually(str(root / "moved" / "nested.txt"), 0)
+        assert eventually(str(empty_target / "nested.txt"), 1)[0]["id"] == nested_id
+        assert call("search", query=str(empty_target), exact=True)["items"][0]["id"] == moved_id
+        (empty_target / "nested.txt").unlink()
         eventually("nested.txt", 0)
         (root / "live.txt").unlink()
         eventually("live.txt", 0)
