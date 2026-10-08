@@ -462,7 +462,18 @@ static void test_timeout(void)
     o.timeout_ms = 60000; o.descending = true; o.offset = 0;
     th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
     CHECK_STR(r.items[0].name,"bulk99999"); th_search_result_free(&r);
-    o.descending = false; o.under = "/absent";
+    /* Streaming must retain all exact predicates, not only the FTS literal. */
+    o.descending = false; o.query = "BULK* !bulk1* /bulk/2";
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK_INT(r.n,3); CHECK_STR(r.items[0].name,"bulk2");
+    CHECK_STR(r.items[1].name,"bulk20"); th_search_result_free(&r);
+    o.match_flags = TH_MATCH_CASE;
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK_INT(r.n,0); th_search_result_free(&r);
+    o.match_flags = 0; o.query = "bulk"; o.min_size = 1;
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK_INT(r.n,0); th_search_result_free(&r);
+    o.min_size = -1; o.under = "/absent";
     th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
     CHECK_INT(r.n,0); th_search_result_free(&r);
 

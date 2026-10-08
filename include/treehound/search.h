@@ -20,9 +20,11 @@
  * matched against the full path, all others against the name.
  *
  * Positive name terms with a literal run of at least three characters are
- * looked up in the trigram FTS index; the candidates are then verified with
- * th_match().  Queries without such a run scan the entries table (still the
- * index database, never the live filesystem).
+ * looked up in the trigram FTS index; selective candidates are verified with
+ * th_match(). Broad filename-ordered pages stream the filename index after a
+ * bounded FTS probe and enforce all terms and filters with exact matching.
+ * Queries without such a run scan the entries table (still the index database,
+ * never the live filesystem).
  */
 
 typedef enum {
