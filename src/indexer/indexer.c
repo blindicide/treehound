@@ -680,14 +680,13 @@ static int entry_flags(scan_ctx *c, int64_t id)
 }
 
 /* A parent diff can observe a rename before its inotify pair reaches the
- * writer. Match moved directories by inode before deleting absent names. */
+ * writer. Match moved entries by inode before deleting absent names. */
 static int reconcile_local_moves(scan_ctx *c, const work_item *w,
                                  const fs_child *fs, size_t nfs, db_child **rows, size_t *nrows)
 {
     if (!*nrows) return 0;
     bool changed = false;
     for (size_t i = 0; i < nfs; i++) {
-        if (!S_ISDIR(fs[i].st.st_mode)) continue;
         size_t lo = 0, hi = *nrows;
         while (lo < hi) {
             size_t mid = lo + (hi - lo) / 2;
@@ -696,16 +695,17 @@ static int reconcile_local_moves(scan_ctx *c, const work_item *w,
         }
         if (lo < *nrows && name_cmp((*rows)[lo].name, (*rows)[lo].name_len, fs[i].name, fs[i].name_len) == 0) continue;
         sqlite3_stmt *find = th_db_prepare(c->db,
-            "SELECT id FROM entries INDEXED BY entries_inode WHERE dev=?1 AND ino=?2 AND root_id=?3 AND parent_id=?4 AND type=1");
+            "SELECT id FROM entries INDEXED BY entries_inode WHERE dev=?1 AND ino=?2 AND root_id=?3 AND parent_id=?4 AND type=?5");
         if (!find) return -1;
         sqlite3_bind_int64(find, 1, (int64_t)fs[i].st.st_dev);
         sqlite3_bind_int64(find, 2, (int64_t)fs[i].st.st_ino);
         sqlite3_bind_int64(find, 3, c->root_id); sqlite3_bind_int64(find, 4, w->id);
+        sqlite3_bind_int(find, 5, type_of(fs[i].st.st_mode));
         int rc = sqlite3_step(find);
         int64_t id = rc == SQLITE_ROW ? sqlite3_column_int64(find, 0) : 0;
         if (rc == SQLITE_ROW && sqlite3_step(find) != SQLITE_DONE) id = 0;
         sqlite3_finalize(find);
-        if (rc != SQLITE_ROW && rc != SQLITE_DONE) return db_fail(c, "find moved directory");
+        if (rc != SQLITE_ROW && rc != SQLITE_DONE) return db_fail(c, "find moved entry");
         if (!id) continue;
         th_entry source = {0};
         if (th_db_entry_get(c->db, id, &source) != 1) return -1;
@@ -724,7 +724,7 @@ static int reconcile_local_moves(scan_ctx *c, const work_item *w,
         th_bind_bytes(move, 4, fs[i].name, fs[i].name_len); sqlite3_bind_int64(move, 5, c->root_id);
         th_bind_bytes(move, 6, c->lo.data, c->lo.len); th_bind_bytes(move, 7, c->hi.data, c->hi.len);
         rc = sqlite3_step(move); sqlite3_finalize(move); th_entry_clear(&source);
-        if (rc != SQLITE_DONE) return db_fail(c, "reconcile directory move");
+        if (rc != SQLITE_DONE) return db_fail(c, "reconcile entry move");
         c->st->updated++; changed = true;
     }
     if (changed) {

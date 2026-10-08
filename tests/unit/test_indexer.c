@@ -350,6 +350,42 @@ static void test_rename_during_reconcile(void)
     th_db_close(db); free(root); free(old); free(next);
 }
 
+static void test_file_rename_during_reconcile(void)
+{
+    mk_dir("file-rename"); mk_file("file-rename/unicodé-old", 7);
+    mk_file("file-rename/linked", 9);
+    char *link_source = tpath("file-rename/linked"), *alias = tpath("file-rename/new-alias");
+    char *symbolic = tpath("file-rename/old-symlink"), *new_symbolic = tpath("file-rename/z-symlink");
+    REQUIRE(symlink("linked", symbolic) == 0);
+    sqlite3 *db = open_db("file-rename.sqlite3"); char *root = tpath("file-rename");
+    int64_t rid = th_db_root_ensure(db, root);
+    CHECK_INT(scan(db, rid, NULL, NULL), TH_SCAN_OK);
+    th_entry before = {0}, after = {0}, link_before = {0}, symlink_before = {0};
+    REQUIRE(get(db, "file-rename/unicodé-old", &before) == 1);
+    REQUIRE(get(db, "file-rename/linked", &link_before) == 1);
+    REQUIRE(get(db, "file-rename/old-symlink", &symlink_before) == 1);
+    char *old = tpath("file-rename/unicodé-old"), *next = tpath("file-rename/z-new");
+    REQUIRE(rename(old, next) == 0); REQUIRE(rename(symbolic, new_symbolic) == 0);
+    REQUIRE(link(link_source, alias) == 0);
+    th_scan_opts opts = {.shallow = true}; th_scan_stats stats; th_strbuf err; th_sb_init(&err);
+    CHECK_INT(th_scan_subtree(db, rid, root, strlen(root), &opts, &stats, &err), TH_SCAN_OK);
+    REQUIRE(get(db, "file-rename/z-new", &after) == 1); CHECK_INT(after.id, before.id);
+    th_entry_clear(&after);
+    REQUIRE(get(db, "file-rename/z-symlink", &after) == 1); CHECK_INT(after.id, symlink_before.id);
+    th_entry_clear(&after);
+    REQUIRE(get(db, "file-rename/linked", &after) == 1); CHECK_INT(after.id, link_before.id);
+    th_entry_clear(&after);
+    REQUIRE(get(db, "file-rename/new-alias", &after) == 1); CHECK(after.id != link_before.id);
+    th_entry_clear(&after);
+    REQUIRE(rename(next, old) == 0);
+    CHECK_INT(th_scan_subtree(db, rid, root, strlen(root), &opts, &stats, &err), TH_SCAN_OK);
+    REQUIRE(get(db, "file-rename/unicodé-old", &after) == 1); CHECK_INT(after.id, before.id);
+    CHECK_INT(stats.dirs, 1); check_consistent(db);
+    th_entry_clear(&before); th_entry_clear(&after); th_entry_clear(&link_before); th_entry_clear(&symlink_before);
+    th_sb_free(&err); th_db_close(db);
+    free(root); free(old); free(next); free(link_source); free(alias); free(symbolic); free(new_symbolic);
+}
+
 static void test_denied(void)
 {
     if (geteuid() == 0) {
@@ -682,6 +718,7 @@ int main(void)
     RUN(test_hardlink_sparse);
     RUN(test_hardlink_subtree);
     RUN(test_rename_during_reconcile);
+    RUN(test_file_rename_during_reconcile);
     RUN(test_denied);
     RUN(test_cancel_and_large);
     RUN(test_subtree);
