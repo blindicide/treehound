@@ -278,6 +278,36 @@ static void test_hardlink_sparse(void)
     th_db_close(db);
 }
 
+static void test_hardlink_subtree(void)
+{
+    mk_dir("links"); mk_dir("links/a"); mk_dir("links/b"); mk_file("links/a/orig", 4096);
+    char *a = tpath("links/a/orig"), *b = tpath("links/b/hard"), *root = tpath("links");
+    REQUIRE(link(a, b) == 0);
+    sqlite3 *db = open_db("links.sqlite3"); int64_t rid = th_db_root_ensure(db, root);
+    CHECK_INT(scan(db, rid, NULL, NULL), TH_SCAN_OK);
+    th_entry x, y; REQUIRE(get(db, "links/a/orig", &x) == 1); REQUIRE(get(db, "links/b/hard", &y) == 1);
+    /* Modify through just one directory: the other indexed link must update. */
+    mk_file("links/a/orig", 8192); char *dir = tpath("links/a");
+    th_strbuf err; th_sb_init(&err); th_scan_stats st;
+    CHECK_INT(th_scan_subtree(db, rid, dir, strlen(dir), NULL, &st, &err), TH_SCAN_OK);
+    th_entry e; REQUIRE(get(db, "links/b/hard", &e) == 1); CHECK_INT(e.size, 8192); th_entry_clear(&e);
+    /* Remove whichever row contributes to totals, leaving its sibling unscanned. */
+    const char *canonical = x.flags & TH_FLAG_LINKDUP ? b : a;
+    const char *survivor = x.flags & TH_FLAG_LINKDUP ? "links/a/orig" : "links/b/hard";
+    REQUIRE(unlink(canonical) == 0); free(dir); dir = th_xstrdup(root);
+    char *slash = strrchr(canonical, '/'); size_t length = (size_t)(slash - canonical);
+    char *parent = th_xmemdup(canonical, length);
+    CHECK_INT(th_scan_subtree(db, rid, parent, length, NULL, &st, &err), TH_SCAN_OK);
+    REQUIRE(get(db, survivor, &e) == 1); CHECK(!(e.flags & TH_FLAG_LINKDUP)); CHECK_INT(e.size, 8192); th_entry_clear(&e);
+    REQUIRE(get(db, "links", &e) == 1);
+    struct stat rs, as, bs; REQUIRE(stat(root, &rs) == 0);
+    char *ad = tpath("links/a"), *bd = tpath("links/b"); REQUIRE(stat(ad, &as) == 0); REQUIRE(stat(bd, &bs) == 0);
+    CHECK_INT(e.agg_size, rs.st_size + as.st_size + bs.st_size + 8192);
+    CHECK_INT(e.agg_files, 1); th_entry_clear(&e); th_entry_clear(&x); th_entry_clear(&y);
+    check_consistent(db); th_db_close(db); th_sb_free(&err);
+    free(a); free(b); free(root); free(dir); free(parent); free(ad); free(bd);
+}
+
 static void test_denied(void)
 {
     if (geteuid() == 0) {
@@ -603,6 +633,7 @@ int main(void)
     RUN(test_mountinfo);
     RUN(test_basic_tree);
     RUN(test_hardlink_sparse);
+    RUN(test_hardlink_subtree);
     RUN(test_denied);
     RUN(test_cancel_and_large);
     RUN(test_subtree);

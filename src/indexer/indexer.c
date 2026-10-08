@@ -172,7 +172,7 @@ typedef struct {
     size_t nother;
 
     sqlite3_stmt *q_children, *q_insert, *q_update, *q_del_range, *q_del_id, *q_linkdup,
-        *q_set_flags, *q_get_flags, *q_agg_sel, *q_agg_upd;
+        *q_set_flags, *q_get_flags, *q_agg_sel, *q_agg_upd, *q_touch;
 
     work_item *stack;
     size_t nstack, capstack;
@@ -250,13 +250,15 @@ static int prepare_all(scan_ctx *c)
     c->q_del_range = th_db_prepare(db, "DELETE FROM entries WHERE root_id = ? AND path >= ? AND path < ?");
     c->q_del_id = th_db_prepare(db, "DELETE FROM entries WHERE id = ?");
     c->q_linkdup = th_db_prepare(db, "SELECT 1 FROM entries WHERE dev = ?1 AND ino = ?2 AND type <> 1 "
-                                     "AND path <> ?3 AND (flags & 8) = 0 LIMIT 1");
+                                     "AND path <> ?3 AND root_id = ?4 AND (flags & 8) = 0 LIMIT 1");
     c->q_set_flags = th_db_prepare(db, "UPDATE entries SET flags = ?2 WHERE id = ?1 AND flags <> ?2");
     c->q_get_flags = th_db_prepare(db, "SELECT flags FROM entries WHERE id = ?");
+    c->q_touch = th_db_prepare(db, "INSERT INTO temp.scan_links(dev,ino,size,alloc,mtime,nlink) VALUES(?1,?2,?3,?4,?5,?6) "
+        "ON CONFLICT(dev,ino) DO UPDATE SET size=excluded.size,alloc=excluded.alloc,mtime=excluded.mtime,nlink=excluded.nlink");
     c->q_agg_sel = th_db_prepare(db, AGG_SELECT_SQL);
     c->q_agg_upd = th_db_prepare(db, AGG_UPDATE_SQL);
     if (!c->q_children || !c->q_insert || !c->q_update || !c->q_del_range || !c->q_del_id ||
-        !c->q_linkdup || !c->q_set_flags || !c->q_get_flags || !c->q_agg_sel || !c->q_agg_upd)
+        !c->q_touch || !c->q_linkdup || !c->q_set_flags || !c->q_get_flags || !c->q_agg_sel || !c->q_agg_upd)
         return db_fail(c, "prepare");
     return 0;
 }
@@ -291,13 +293,13 @@ static bool ctx_init(scan_ctx *c, sqlite3 *db, int64_t root_id, const th_scan_op
     th_sb_init(&c->hi);
     th_sb_init(&c->child);
     load_other_roots(c);
-    return prepare_all(c) == 0;
+    return th_db_exec(db, "CREATE TEMP TABLE IF NOT EXISTS scan_links(dev INTEGER,ino INTEGER,size INTEGER,alloc INTEGER,mtime INTEGER,nlink INTEGER,PRIMARY KEY(dev,ino)) WITHOUT ROWID; DELETE FROM temp.scan_links") == 0 && prepare_all(c) == 0;
 }
 
 static void ctx_free(scan_ctx *c)
 {
     sqlite3_stmt *all[] = {c->q_children, c->q_insert,    c->q_update,  c->q_del_range, c->q_del_id,
-                           c->q_linkdup,  c->q_set_flags, c->q_get_flags, c->q_agg_sel, c->q_agg_upd};
+                           c->q_linkdup,  c->q_set_flags, c->q_get_flags, c->q_agg_sel, c->q_agg_upd, c->q_touch};
     for (size_t i = 0; i < TH_ARRAY_LEN(all); i++)
         sqlite3_finalize(all[i]);
     for (size_t i = 0; i < c->nstack; i++)
@@ -333,6 +335,11 @@ static int64_t alloc_of(const struct stat *s)
 static int delete_below(scan_ctx *c, const char *path, size_t len)
 {
     th_subtree_range(path, len, &c->lo, &c->hi);
+    sqlite3_stmt *links = th_db_prepare(c->db, "INSERT OR IGNORE INTO temp.scan_links(dev,ino) SELECT dev,ino FROM entries WHERE root_id=?1 AND path>=?2 AND path<?3 AND type=0 AND nlink>1");
+    if (!links) return -1;
+    sqlite3_bind_int64(links, 1, c->root_id); th_bind_bytes(links, 2, c->lo.data, c->lo.len); th_bind_bytes(links, 3, c->hi.data, c->hi.len);
+    int captured = sqlite3_step(links); sqlite3_finalize(links);
+    if (captured != SQLITE_DONE) return -1;
     sqlite3_reset(c->q_del_range);
     sqlite3_bind_int64(c->q_del_range, 1, c->root_id);
     th_bind_bytes(c->q_del_range, 2, c->lo.data, c->lo.len);
@@ -348,6 +355,10 @@ static int delete_entry(scan_ctx *c, int64_t id, const char *path, size_t len, b
 {
     if (is_dir && delete_below(c, path, len) != 0)
         return -1;
+    sqlite3_stmt *links = th_db_prepare(c->db, "INSERT OR IGNORE INTO temp.scan_links(dev,ino) SELECT dev,ino FROM entries WHERE id=? AND type=0 AND nlink>1");
+    if (!links) return -1;
+    sqlite3_bind_int64(links, 1, id); int captured = sqlite3_step(links); sqlite3_finalize(links);
+    if (captured != SQLITE_DONE) return -1;
     sqlite3_reset(c->q_del_id);
     sqlite3_bind_int64(c->q_del_id, 1, id);
     if (step_done(c, c->q_del_id, "delete entry") != 0)
@@ -410,10 +421,17 @@ static int classify(scan_ctx *c, const char *path, size_t len, const struct stat
         if (alloc < (int64_t)s->st_size)
             flags |= TH_FLAG_SPARSE;
         if (s->st_nlink > 1) {
+            sqlite3_reset(c->q_touch);
+            sqlite3_bind_int64(c->q_touch, 1, (int64_t)s->st_dev); sqlite3_bind_int64(c->q_touch, 2, (int64_t)s->st_ino);
+            sqlite3_bind_int64(c->q_touch, 3, (int64_t)s->st_size); sqlite3_bind_int64(c->q_touch, 4, alloc);
+            sqlite3_bind_int64(c->q_touch, 5, (int64_t)s->st_mtim.tv_sec); sqlite3_bind_int64(c->q_touch, 6, (int64_t)s->st_nlink);
+            if (sqlite3_step(c->q_touch) != SQLITE_DONE) c->st->errors++;
+            sqlite3_reset(c->q_touch);
             sqlite3_reset(c->q_linkdup);
             sqlite3_bind_int64(c->q_linkdup, 1, (int64_t)s->st_dev);
             sqlite3_bind_int64(c->q_linkdup, 2, (int64_t)s->st_ino);
             th_bind_bytes(c->q_linkdup, 3, path, len);
+            sqlite3_bind_int64(c->q_linkdup, 4, c->root_id);
             if (sqlite3_step(c->q_linkdup) == SQLITE_ROW)
                 flags |= TH_FLAG_LINKDUP;
             sqlite3_reset(c->q_linkdup);
@@ -661,6 +679,10 @@ static int scan_one_dir(scan_ctx *c, const work_item *w)
         return 0;
     }
     c->st->dirs++;
+    sqlite3_stmt *links = th_db_prepare(c->db, "INSERT OR IGNORE INTO temp.scan_links(dev,ino) SELECT dev,ino FROM entries WHERE parent_id=? AND type=0 AND nlink>1");
+    if (!links) { free_fs(fs, nfs); return -1; }
+    sqlite3_bind_int64(links, 1, w->id); int captured = sqlite3_step(links); sqlite3_finalize(links);
+    if (captured != SQLITE_DONE) { free_fs(fs, nfs); return -1; }
     db_child *db = NULL;
     size_t ndb = 0;
     int rc = load_db_children(c, w->id, &db, &ndb);
@@ -696,6 +718,34 @@ static int walk(scan_ctx *c)
             return -1;
     }
     return 0;
+}
+
+/* Only touched hard-link inodes: retain one canonical row per root, and
+ * propagate shared metadata without traversing unrelated filesystem paths. */
+static int repair_links(scan_ctx *c)
+{
+    sqlite3_stmt *rows = th_db_prepare(c->db,
+        "SELECT e.id,e.parent_id,e.id=(SELECT min(x.id) FROM entries x WHERE x.root_id=e.root_id AND x.dev=e.dev AND x.ino=e.ino AND x.type=0),"
+        "coalesce(t.size,e.size),coalesce(t.alloc,e.alloc),coalesce(t.mtime,e.mtime),coalesce(t.nlink,e.nlink),e.flags "
+        "FROM temp.scan_links t JOIN entries e ON e.dev=t.dev AND e.ino=t.ino WHERE e.root_id=? AND e.type=0");
+    sqlite3_stmt *upd = th_db_prepare(c->db,
+        "UPDATE entries SET flags=?2,size=?3,alloc=?4,agg_size=?3,agg_alloc=?4,mtime=?5,nlink=?6 "
+        "WHERE id=?1 AND (flags<>?2 OR size<>?3 OR alloc<>?4 OR mtime<>?5 OR nlink<>?6)");
+    if (!rows || !upd) { sqlite3_finalize(rows); sqlite3_finalize(upd); return -1; }
+    sqlite3_bind_int64(rows, 1, c->root_id);
+    int64_t *changed = NULL; size_t n = 0; int rc;
+    while ((rc = sqlite3_step(rows)) == SQLITE_ROW) {
+        int64_t id = sqlite3_column_int64(rows, 0);
+        int flags = sqlite3_column_int(rows, 7) & ~TH_FLAG_LINKDUP;
+        if (!sqlite3_column_int(rows, 2)) flags |= TH_FLAG_LINKDUP;
+        sqlite3_reset(upd); sqlite3_bind_int64(upd, 1, id); sqlite3_bind_int(upd, 2, flags);
+        for (int i = 3; i <= 6; i++) sqlite3_bind_int64(upd, i, sqlite3_column_int64(rows, i));
+        if (sqlite3_step(upd) != SQLITE_DONE) { rc = SQLITE_ERROR; break; }
+        if (sqlite3_changes(c->db)) { changed = th_xrealloc(changed, (n + 1) * sizeof *changed); changed[n++] = id; }
+    }
+    sqlite3_finalize(rows); sqlite3_finalize(upd);
+    for (size_t i = 0; rc == SQLITE_DONE && i < n; i++) if (th_index_refresh_ancestors(c->db, changed[i]) != 0) rc = SQLITE_ERROR;
+    free(changed); return rc == SQLITE_DONE ? 0 : -1;
 }
 
 /* Recomputes aggregates for path itself and every directory below it, deepest first. */
@@ -860,6 +910,7 @@ int th_scan_root(sqlite3 *db, int64_t root_id, const th_scan_opts *o, th_scan_st
         push(&c, top, path, len, true);
         progress(&c, path, true);
         w = walk(&c);
+        if (w == 0 && repair_links(&c) != 0) w = -1;
         if (w == 0 && aggregate_subtree(&c, top, path, len) != 0)
             w = -1;
     }
@@ -1017,9 +1068,11 @@ int th_scan_subtree(sqlite3 *db, int64_t root_id, const char *path, size_t len, 
                 w = -1;
             }
         }
+        if (w == 0 && repair_links(&c) != 0) w = -1;
         if (w == 0 && aggregate_subtree(&c, id, dir, dlen) != 0)
             w = -1;
     }
+    if (w == 0 && !id && repair_links(&c) != 0) w = -1;
     if (w >= 0 && th_db_commit(db) != 0) {
         db_fail(&c, "commit");
         w = -1;
