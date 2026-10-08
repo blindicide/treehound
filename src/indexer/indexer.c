@@ -676,6 +676,61 @@ static int entry_flags(scan_ctx *c, int64_t id)
     return flags;
 }
 
+/* A parent diff can observe a rename before its inotify pair reaches the
+ * writer. Match moved directories by inode before deleting absent names. */
+static int reconcile_local_moves(scan_ctx *c, const work_item *w,
+                                 const fs_child *fs, size_t nfs, db_child **rows, size_t *nrows)
+{
+    if (!*nrows) return 0;
+    bool changed = false;
+    for (size_t i = 0; i < nfs; i++) {
+        if (!S_ISDIR(fs[i].st.st_mode)) continue;
+        size_t lo = 0, hi = *nrows;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+            if (name_cmp((*rows)[mid].name, (*rows)[mid].name_len, fs[i].name, fs[i].name_len) < 0) lo = mid + 1;
+            else hi = mid;
+        }
+        if (lo < *nrows && name_cmp((*rows)[lo].name, (*rows)[lo].name_len, fs[i].name, fs[i].name_len) == 0) continue;
+        sqlite3_stmt *find = th_db_prepare(c->db,
+            "SELECT id FROM entries INDEXED BY entries_inode WHERE dev=?1 AND ino=?2 AND root_id=?3 AND parent_id=?4 AND type=1");
+        if (!find) return -1;
+        sqlite3_bind_int64(find, 1, (int64_t)fs[i].st.st_dev);
+        sqlite3_bind_int64(find, 2, (int64_t)fs[i].st.st_ino);
+        sqlite3_bind_int64(find, 3, c->root_id); sqlite3_bind_int64(find, 4, w->id);
+        int rc = sqlite3_step(find);
+        int64_t id = rc == SQLITE_ROW ? sqlite3_column_int64(find, 0) : 0;
+        if (rc == SQLITE_ROW && sqlite3_step(find) != SQLITE_DONE) id = 0;
+        sqlite3_finalize(find);
+        if (rc != SQLITE_ROW && rc != SQLITE_DONE) return db_fail(c, "find moved directory");
+        if (!id) continue;
+        th_entry source = {0};
+        if (th_db_entry_get(c->db, id, &source) != 1) return -1;
+        struct stat old;
+        int present = lstat(source.path, &old), error = errno;
+        if ((present == 0 && old.st_dev == fs[i].st.st_dev && old.st_ino == fs[i].st.st_ino) ||
+            (present < 0 && error != ENOENT && error != ENOTDIR)) { th_entry_clear(&source); continue; }
+        child_path(c, w->path, w->len, fs[i].name, fs[i].name_len);
+        th_subtree_range(source.path, source.path_len, &c->lo, &c->hi);
+        sqlite3_stmt *move = th_db_prepare(c->db,
+            "UPDATE entries SET path=CAST(?1 || substr(CAST(path AS BLOB),?2) AS TEXT), name=CASE WHEN id=?3 THEN ?4 ELSE name END "
+            "WHERE root_id=?5 AND (id=?3 OR (path>=?6 AND path<?7))");
+        if (!move) { th_entry_clear(&source); return -1; }
+        th_bind_bytes(move, 1, c->child.data, c->child.len);
+        sqlite3_bind_int64(move, 2, (int64_t)source.path_len + 1); sqlite3_bind_int64(move, 3, id);
+        th_bind_bytes(move, 4, fs[i].name, fs[i].name_len); sqlite3_bind_int64(move, 5, c->root_id);
+        th_bind_bytes(move, 6, c->lo.data, c->lo.len); th_bind_bytes(move, 7, c->hi.data, c->hi.len);
+        rc = sqlite3_step(move); sqlite3_finalize(move); th_entry_clear(&source);
+        if (rc != SQLITE_DONE) return db_fail(c, "reconcile directory move");
+        c->st->updated++; changed = true;
+    }
+    if (changed) {
+        free_db(*rows, *nrows); *rows = NULL; *nrows = 0;
+        return load_db_children(c, w->id, rows, nrows);
+    }
+    return 0;
+}
+
 static int scan_one_dir(scan_ctx *c, const work_item *w)
 {
     int fd = th_open_dir(w->path, w->len, w->follow);
@@ -719,6 +774,7 @@ static int scan_one_dir(scan_ctx *c, const work_item *w)
     db_child *db = NULL;
     size_t ndb = 0;
     int rc = load_db_children(c, w->id, &db, &ndb);
+    if (rc == 0) rc = reconcile_local_moves(c, w, fs, nfs, &db, &ndb);
     size_t i = 0, j = 0;
     while (rc == 0 && (i < nfs || j < ndb)) {
         int cmp = i >= nfs ? 1 : j >= ndb ? -1 : name_cmp(fs[i].name, fs[i].name_len, db[j].name, db[j].name_len);

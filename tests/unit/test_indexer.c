@@ -325,6 +325,31 @@ static void test_hardlink_subtree(void)
     free(a); free(b); free(root); free(dir); free(parent); free(ad); free(bd);
 }
 
+static void test_rename_during_reconcile(void)
+{
+    mk_dir("rename-race"); mk_dir("rename-race/unicodé-old");
+    mk_dir("rename-race/unicodé-old/deep"); mk_file("rename-race/unicodé-old/deep/item", 7);
+    sqlite3 *db = open_db("rename-race.sqlite3"); char *root = tpath("rename-race");
+    int64_t rid = th_db_root_ensure(db, root);
+    CHECK_INT(scan(db, rid, NULL, NULL), TH_SCAN_OK);
+    th_entry before = {0}, after = {0};
+    REQUIRE(get(db, "rename-race/unicodé-old/deep/item", &before) == 1);
+    char *old = tpath("rename-race/unicodé-old"), *next = tpath("rename-race/z-new");
+    REQUIRE(rename(old, next) == 0);
+    th_scan_opts opts = {.shallow = true}; th_scan_stats stats; th_strbuf err; th_sb_init(&err);
+    CHECK_INT(th_scan_subtree(db, rid, root, strlen(root), &opts, &stats, &err), TH_SCAN_OK);
+    REQUIRE(get(db, "rename-race/z-new/deep/item", &after) == 1);
+    CHECK_INT(after.id, before.id); CHECK_INT(stats.dirs, 1);
+    th_entry_clear(&after);
+    REQUIRE(rename(next, old) == 0);
+    CHECK_INT(th_scan_subtree(db, rid, root, strlen(root), &opts, &stats, &err), TH_SCAN_OK);
+    REQUIRE(get(db, "rename-race/unicodé-old/deep/item", &after) == 1);
+    CHECK_INT(after.id, before.id); CHECK_INT(stats.dirs, 1);
+    CHECK(!exists(db, "rename-race/z-new/deep/item")); check_consistent(db);
+    th_entry_clear(&before); th_entry_clear(&after); th_sb_free(&err);
+    th_db_close(db); free(root); free(old); free(next);
+}
+
 static void test_denied(void)
 {
     if (geteuid() == 0) {
@@ -656,6 +681,7 @@ int main(void)
     RUN(test_basic_tree);
     RUN(test_hardlink_sparse);
     RUN(test_hardlink_subtree);
+    RUN(test_rename_during_reconcile);
     RUN(test_denied);
     RUN(test_cancel_and_large);
     RUN(test_subtree);
