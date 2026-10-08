@@ -1,0 +1,23 @@
+{
+  "measured_at_utc": "2026-10-08T22:48:02Z",
+  "head": "7bef60b4091526eace7d498d729c0734dbe96dd0",
+  "working_tree_dirty": true,
+  "binary_sha256": "b5f3832789cacd2839ab0266b090378f177fd561e9ce7b3b325efc88e63a04c6",
+  "version": "treehoundd 0.5.1",
+  "platform": "Linux-6.8.0-142-generic-x86_64-with-glibc2.39",
+  "filesystem": "ext2/ext3",
+  "directories": 20000,
+  "indexed_entries": 40001,
+  "kernel_watches": 20001,
+  "initial_scan_seconds": 2.6118484149919823,
+  "root_logical_size_before": 82484768,
+  "root_logical_size_after": 82485768,
+  "burst_files": 1000,
+  "burst_seconds": 0.727744661970064,
+  "burst_cpu_seconds": 0.91,
+  "memory": {
+    "VmHWM": 35033088,
+    "VmRSS": 35033088
+  },
+  "provenance_note": "Same executable hash as the clean 7bef60b million-file run; working tree has only documentation and uncompiled search-test/header-comment changes. No heavy tests ran during the burst."
+}

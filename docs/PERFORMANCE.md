@@ -46,6 +46,28 @@ labels this filesystem “ext2/ext3”; the live mount table identifies ext4.
 The repeatable fixture/measurement harness is `tests/benchmarks/million.py`;
 see [BUILDING.md](BUILDING.md). Retained local fixture/index data are not packaged.
 
+## v0.5.1 measured release candidate
+
+A fresh clean-code run of commit `7bef60b` indexed the same actual 1,001,001
+entries in 58.02s. Warm three-/six-character search p95 was 40.67/3.09ms; broad
+`item`/`dat`/`it` pages took 4.74/3.39/2.61ms. Offsets 0, 200, 400 and 10,000
+returned disjoint 200-row matching pages in 3.67/4.13/3.90/10.40ms. Idle RSS was
+23,175,168B with 0 CPU seconds over 10 seconds; query peak RSS was 34,877,440B.
+GTK first indexed listing p95 was 612.72ms across ten actual Xvfb launches.
+[Raw versioned run](benchmarks/v0.5.1-million.json) includes hashes, timings and
+clean-HEAD provenance; only the fixture root path is normalized for privacy.
+These single-host measurements meet the stated warm-query, memory and launch
+targets; storage-media and physical-filesystem gaps below remain.
+
+The same executable indexed 20,000 actual directories and their marker files
+in 2.61s, retaining 20,001 kernel watches. A coalesced 1,000-file burst converged
+in 0.728s with 0.91 CPU seconds and 35,033,088B resident memory; all 1,000 changed
+files and the root's exact +1,000B logical delta were checked before measurement
+completed. [Raw final burst](benchmarks/v0.5.1-watch-burst.json) records the
+documentation/test-only dirty state and matching executable hash. The original
+16.95s baseline and intermediate candidates remain in
+[the burst comparison](benchmarks/v0.5-watch-burst.json).
+
 ## Continuation: deep pagination
 
 The prepared 0.5.1 search plan timed out at offset 10,000 on the retained
