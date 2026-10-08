@@ -18,13 +18,13 @@ typedef struct { int64_t root, parent, size; char *path; } Location;
 typedef struct {
     GtkApplication *app;
     GtkWidget *window, *roots, *search, *status, *breadcrumb, *view, *settings, *config_text;
-    GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before;
+    GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before, *exact, *global;
     GtkDropDown *sort, *types;
     GListStore *model;
     GtkSingleSelection *selection;
     char *socket, *path, *pending;
     int64_t root, parent, parent_size, offset;
-    guint generation, pending_kind, smoke_stage;
+    guint generation, pending_kind, smoke_stage, retry_source, smoke_source;
     bool busy, closing, smoke, smoke_failed;
     GArray *history;
 } Ui;
@@ -32,6 +32,7 @@ typedef struct { char *request, *socket; guint generation, kind; bool start; } W
 static void query(Ui *u);
 static void show_settings(Ui *u, const char *text);
 static void submit(Ui *u, char *request, guint kind);
+static gboolean retry_roots(gpointer data) { Ui *u = data; u->retry_source = 0; if (!u->closing) submit(u, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1); return G_SOURCE_REMOVE; }
 static void row_free(gpointer data)
 {
     Row *r = data;
@@ -119,7 +120,7 @@ static void populate(Ui *u, const th_jval *items)
         r->fraction = u->parent_size > 0 ? CLAMP((double)r->size / (double)u->parent_size, 0., 1.) : 0.;
         r->text[3] = g_strdup_printf("%.1f%%", r->fraction * 100.);
         r->text[4] = g_format_size((guint64)MAX(th_json_get_int(v, "allocated", 0), 0));
-        r->text[5] = g_strdup_printf("%lld", (long long)th_json_get_int(v, "files", 0));
+        r->text[5] = g_strdup_printf("%lld", (long long)(!strcmp(r->type, "dir") ? th_json_get_int(v, "files", 0) : 1));
         GDateTime *date = g_date_time_new_from_unix_local(th_json_get_int(v, "mtime", 0));
         r->text[6] = date ? g_date_time_format(date, "%Y-%m-%d %H:%M") : g_strdup("—");
         if (date) g_date_time_unref(date);
@@ -138,18 +139,27 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
             gtk_label_set_text(GTK_LABEL(u->status), error ? error->message : th_json_get_str(res, "error", "Request failed"));
             if (u->smoke) u->smoke_failed = true;
         } else if (w->kind == 1) {
+            GtkWidget *child; while ((child = gtk_widget_get_first_child(u->roots))) gtk_box_remove(GTK_BOX(u->roots), child);
+            bool updating = false;
             const th_jval *roots = th_json_get(res, "roots");
             if (roots) for (size_t i = 0; i < roots->n; i++) {
                 const th_jval *v = &roots->items[i]; Row *r = g_new0(Row, 1);
                 r->id = th_json_get_int(v, "entry_id", 0); r->root = th_json_get_int(v, "id", 0);
                 r->size = th_json_get_int(v, "size", 0); r->path = th_xstrdup(th_json_get_str(v, "path", ""));
                 char *valid = g_utf8_make_valid(r->path, -1);
-                char *label = g_strdup_printf("%s\n%s", valid, th_json_get_str(v, "status", "indexed"));
-                GtkWidget *b = gtk_button_new_with_label(label); g_free(label); g_free(valid);
+                const char *state = th_json_get_str(v, "status", "indexed");
+                updating |= !strcmp(state, "indexed") || !strcmp(state, "updating");
+                char *label = g_strdup_printf("%s\n%s · %s", valid, state, th_json_get_str(v, "error", ""));
+                GtkWidget *b = gtk_button_new_with_label(label);
+                GtkLabel *caption = GTK_LABEL(gtk_button_get_child(GTK_BUTTON(b))); gtk_label_set_ellipsize(caption, PANGO_ELLIPSIZE_MIDDLE); gtk_label_set_max_width_chars(caption, 24);
+                g_free(label); g_free(valid);
                 g_object_set_data_full(G_OBJECT(b), "row", r, row_free);
                 g_signal_connect(b, "clicked", G_CALLBACK(root_clicked), u); gtk_box_append(GTK_BOX(u->roots), b);
-                if (i == 0) navigate(u, r->root, r->id, r->path, r->size);
+                if (!u->parent && r->id && i == 0) navigate(u, r->root, r->id, r->path, r->size);
+                else if (u->parent == r->id) u->parent_size = r->size;
             }
+            if (updating && !u->retry_source) u->retry_source = g_timeout_add(1000, retry_roots, u);
+            if (u->parent) query(u);
         } else if (w->kind == 2) {
             populate(u, th_json_get(res, "items"));
             char *text = g_strdup_printf("%u results on page %lld · %.1f ms · %s", g_list_model_get_n_items(G_LIST_MODEL(u->model)),
@@ -162,6 +172,9 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
                 if (u->smoke_stage == 1) gtk_editable_set_text(GTK_EDITABLE(u->search), "smoke");
                 else if (u->smoke_stage == 2) g_application_quit(G_APPLICATION(u->app));
             }
+        } else if (w->kind == 6) {
+            const th_jval *items = th_json_get(res, "items");
+            if (items && items->n) { const th_jval *v = &items->items[0]; navigate(u, th_json_get_int(v, "root_id", 0), th_json_get_int(v, "id", 0), th_json_get_str(v, "path", ""), th_json_get_int(v, "size", 0)); }
         } else if (w->kind == 4) {
             show_settings(u, th_json_get_str(res, "config", ""));
         } else if (w->kind == 5) {
@@ -192,8 +205,9 @@ static void query(Ui *u)
     const char *text = gtk_editable_get_text(GTK_EDITABLE(u->search));
     th_strbuf b; th_sb_init(&b); th_jw w; th_jw_init(&w, &b); th_jw_obj_begin(&w);
     th_jw_kv_int(&w, "v", 1); th_jw_kv_str(&w, "cmd", *text ? "search" : "list");
-    th_jw_kv_str(&w, "query", text); th_jw_kv_int(&w, "root_id", u->root);
-    if (*text) th_jw_kv_str(&w, "under", u->path); else th_jw_kv_int(&w, "parent_id", u->parent);
+    th_jw_kv_str(&w, "query", text); th_jw_kv_int(&w, "root_id", gtk_check_button_get_active(GTK_CHECK_BUTTON(u->global)) && *text ? 0 : u->root);
+    if (*text) { if (!gtk_check_button_get_active(GTK_CHECK_BUTTON(u->global))) th_jw_kv_str(&w, "under", u->path); } else th_jw_kv_int(&w, "parent_id", u->parent);
+    th_jw_kv_bool(&w, "exact", gtk_check_button_get_active(GTK_CHECK_BUTTON(u->exact)));
     th_jw_kv_int(&w, "limit", 200); th_jw_kv_int(&w, "offset", u->offset);
     const char *sorts[] = {"name", "size", "path", "mtime", "type"};
     const char *types[] = {"all", "file", "dir"};
@@ -219,7 +233,15 @@ static void query(Ui *u)
 }
 static void changed(GtkWidget *widget, gpointer data) { (void)widget; Ui *u = data; u->offset = 0; query(u); }
 static void dropdown_changed(GObject *object, GParamSpec *param, gpointer data) { (void)object; (void)param; changed(NULL, data); }
-static void refresh(GtkButton *button, gpointer data) { (void)button; query(data); }
+static void refresh(GtkButton *button, gpointer data) { (void)button; submit(data, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1); }
+static void up(GtkButton *button, gpointer data)
+{
+    (void)button; Ui *u = data; if (!u->path || !strcmp(u->path, "/")) return;
+    char *parent = g_path_get_dirname(u->path); th_strbuf b; th_sb_init(&b); th_jw w; th_jw_init(&w, &b);
+    th_jw_obj_begin(&w); th_jw_kv_int(&w, "v", 1); th_jw_kv_str(&w, "cmd", "search"); th_jw_kv_bytes(&w, "query", parent, strlen(parent));
+    th_jw_kv_bool(&w, "exact", true); th_jw_kv_int(&w, "root_id", u->root); th_jw_kv_int(&w, "limit", 1); th_jw_obj_end(&w);
+    submit(u, g_strdup(b.data), 6); th_sb_free(&b); g_free(parent);
+}
 static void page(GtkButton *button, gpointer data)
 {
     Ui *u = data; int direction = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "direction"));
@@ -303,8 +325,24 @@ static GtkWidget *button(GtkWidget *box, const char *text, GCallback callback, U
 {
     GtkWidget *b = gtk_button_new_with_label(text); gtk_box_append(GTK_BOX(box), b); g_signal_connect(b, "clicked", callback, u); return b;
 }
-static gboolean close_window(GtkWindow *window, gpointer data) { (void)window; Ui *u = data; u->closing = true; return FALSE; }
-static gboolean smoke_timeout(gpointer data) { Ui *u = data; u->smoke_failed = true; g_application_quit(G_APPLICATION(u->app)); return G_SOURCE_REMOVE; }
+static void preferences(Ui *u, bool save)
+{
+    char *path = th_gui_config_path(); GKeyFile *key = g_key_file_new();
+    const char *names[] = {"hidden", "case_sensitive", "descending", "exact", "all_roots"};
+    GtkWidget *widgets[] = {u->hidden, u->sensitive, u->descending, u->exact, u->global};
+    if (save) {
+        for (size_t i = 0; i < 5; i++) g_key_file_set_boolean(key, "view", names[i], gtk_check_button_get_active(GTK_CHECK_BUTTON(widgets[i])));
+        g_key_file_set_integer(key, "view", "sort", (int)gtk_drop_down_get_selected(u->sort));
+        gsize n; char *text = g_key_file_to_data(key, &n, NULL); char *dir = th_config_dir(); th_mkdir_p(dir, 0700); free(dir);
+        th_write_file_atomic(path, text, n, 0600); g_free(text);
+    } else if (g_key_file_load_from_file(key, path, G_KEY_FILE_NONE, NULL)) {
+        for (size_t i = 0; i < 5; i++) gtk_check_button_set_active(GTK_CHECK_BUTTON(widgets[i]), g_key_file_get_boolean(key, "view", names[i], NULL));
+        int sort = g_key_file_get_integer(key, "view", "sort", NULL); if (sort >= 0 && sort < 5) gtk_drop_down_set_selected(u->sort, (guint)sort);
+    }
+    g_key_file_unref(key); free(path);
+}
+static gboolean close_window(GtkWindow *window, gpointer data) { (void)window; Ui *u = data; preferences(u, true); u->closing = true; return FALSE; }
+static gboolean smoke_timeout(gpointer data) { Ui *u = data; u->smoke_source = 0; u->smoke_failed = true; g_application_quit(G_APPLICATION(u->app)); return G_SOURCE_REMOVE; }
 static void activate(GtkApplication *app, gpointer data)
 {
     Ui *u = data; u->window = gtk_application_window_new(app); gtk_window_set_title(GTK_WINDOW(u->window), "Treehound " TH_VERSION);
@@ -325,13 +363,14 @@ static void activate(GtkApplication *app, gpointer data)
     gtk_box_append(GTK_BOX(filters), GTK_WIDGET(u->sort)); gtk_box_append(GTK_BOX(filters), GTK_WIDGET(u->types));
     g_signal_connect(u->sort, "notify::selected", G_CALLBACK(dropdown_changed), u); g_signal_connect(u->types, "notify::selected", G_CALLBACK(dropdown_changed), u);
     u->descending = gtk_check_button_new_with_label("Descending"); u->hidden = gtk_check_button_new_with_label("Hidden"); u->sensitive = gtk_check_button_new_with_label("Case sensitive");
-    GtkWidget *checks[] = {u->descending, u->hidden, u->sensitive};
-    for (size_t i = 0; i < 3; i++) { gtk_box_append(GTK_BOX(filters), checks[i]); g_signal_connect(checks[i], "toggled", G_CALLBACK(changed), u); }
+    u->exact = gtk_check_button_new_with_label("Exact"); u->global = gtk_check_button_new_with_label("All roots");
+    GtkWidget *checks[] = {u->descending, u->hidden, u->sensitive, u->exact, u->global};
+    for (size_t i = 0; i < 5; i++) { gtk_box_append(GTK_BOX(filters), checks[i]); g_signal_connect(checks[i], "toggled", G_CALLBACK(changed), u); }
     GtkWidget *advanced = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6); GtkWidget *expander = gtk_expander_new("Search filters (Enter to apply)");
     gtk_expander_set_child(GTK_EXPANDER(expander), advanced); gtk_box_append(GTK_BOX(box), expander);
     u->extension = entry(advanced, "Extension", u); u->minimum = entry(advanced, "Min size", u); u->maximum = entry(advanced, "Max size", u);
     u->after = entry(advanced, "After / 7d", u); u->before = entry(advanced, "Before", u);
-    GtkWidget *nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6); gtk_box_append(GTK_BOX(box), nav); button(nav, "Back", G_CALLBACK(back), u);
+    GtkWidget *nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6); gtk_box_append(GTK_BOX(box), nav); button(nav, "Back", G_CALLBACK(back), u); button(nav, "Up", G_CALLBACK(up), u);
     u->breadcrumb = gtk_label_new("Indexed roots"); gtk_label_set_ellipsize(GTK_LABEL(u->breadcrumb), PANGO_ELLIPSIZE_START); gtk_label_set_xalign(GTK_LABEL(u->breadcrumb), 0);
     gtk_widget_set_hexpand(u->breadcrumb, true); gtk_box_append(GTK_BOX(nav), u->breadcrumb);
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL); gtk_widget_set_vexpand(paned, true); gtk_box_append(GTK_BOX(box), paned);
@@ -355,8 +394,9 @@ static void activate(GtkApplication *app, gpointer data)
     const char *actions[] = {"open", "folder", "copy"}; const char *labels[] = {"Open", "Open folder", "Copy path"};
     for (size_t i = 0; i < 3; i++) { GtkWidget *b = button(footer, labels[i], G_CALLBACK(selected_action), u); g_object_set_data(G_OBJECT(b), "action", (gpointer)actions[i]); }
     u->status = gtk_label_new("Connecting…"); gtk_label_set_xalign(GTK_LABEL(u->status), 0); gtk_box_append(GTK_BOX(box), u->status);
+    preferences(u, false);
     gtk_window_present(GTK_WINDOW(u->window)); submit(u, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1);
-    if (u->smoke) g_timeout_add_seconds(10, smoke_timeout, u);
+    if (u->smoke) u->smoke_source = g_timeout_add_seconds(10, smoke_timeout, u);
 }
 static void ui_free(gpointer data)
 {
@@ -372,5 +412,6 @@ int th_gui_run(int argc, char **argv)
     GtkApplication *app = gtk_application_new("io.github.blindicide.treehound", G_APPLICATION_NON_UNIQUE); u->app = app;
     g_object_set_data_full(G_OBJECT(app), "ui", u, ui_free); g_signal_connect(app, "activate", G_CALLBACK(activate), u);
     int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 2)) result = 4;
-    u->closing = true; g_object_unref(app); return result;
+    u->closing = true; if (u->retry_source) g_source_remove(u->retry_source); if (u->smoke_source) g_source_remove(u->smoke_source);
+    g_object_unref(app); return result;
 }
