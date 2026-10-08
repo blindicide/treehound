@@ -4,7 +4,10 @@ Treehound targets Linux x86-64 and C17. `treehoundd` owns the writable SQLite
 connection. Its scanner thread processes FIFO reconciliation jobs; connection
 threads use separate read-only handles and remain available while scanning.
 At most 32 connections are served simultaneously. Each connection handles one
-request with a five-second framing deadline. Requests are capped at 64 KiB,
+request with a five-second receive deadline and a five-second response-send
+deadline. Client calls share one monotonic deadline across connect, send and
+receive; nonblocking I/O after readiness prevents a stalled peer from hanging
+a worker. A saturated socket is never mistaken for a dead daemon. Requests are capped at 64 KiB,
 responses at 64 MiB, and pages at 5,000 rows. Search has a one-second SQLite
 progress-handler deadline, including the short-query database fallback.
 

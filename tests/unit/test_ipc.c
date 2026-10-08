@@ -6,11 +6,15 @@
 #include "treehound/util.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 
 static char tmpdir[] = "/tmp/th-test-ipc-XXXXXX";
@@ -63,6 +67,41 @@ static void test_framing(void)
     close(sv[0]);
     CHECK(th_ipc_recv(sv[1], 100, 1000, &m, &n) == 1);
     close(sv[1]);
+}
+
+typedef struct { int fd; bool valid; } receiver_arg;
+static void *large_receiver(void *arg)
+{
+    receiver_arg *r = arg;
+    char *message = NULL; size_t len = 0;
+    r->valid = th_ipc_recv(r->fd, TH_IPC_MAX_RESPONSE, 2000, &message, &len) == 0;
+    r->valid = r->valid && len == 1024 * 1024;
+    for (size_t i = 0; r->valid && i < len; i++) r->valid = message[i] == 'x';
+    free(message);
+    return NULL;
+}
+static void test_send_deadline(void)
+{
+    int sv[2]; REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    int small = 4096;
+    REQUIRE(setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &small, sizeof small) == 0);
+    char *data = malloc(1024 * 1024); REQUIRE(data); memset(data, 'x', 1024 * 1024);
+    int64_t started = th_mono_ms();
+    CHECK(th_ipc_send_timeout(sv[0], data, 1024 * 1024, 50) == -1);
+    CHECK_INT(errno, ETIMEDOUT);
+    CHECK(th_mono_ms() - started >= 40 && th_mono_ms() - started < 1000);
+    close(sv[0]); close(sv[1]);
+    /* Partial writes still deliver one complete frame when the peer drains it. */
+    REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    REQUIRE(setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &small, sizeof small) == 0);
+    receiver_arg receiver = {.fd = sv[1]}; pthread_t thread;
+    REQUIRE(pthread_create(&thread, NULL, large_receiver, &receiver) == 0);
+    CHECK(th_ipc_send_timeout(sv[0], data, 1024 * 1024, 2000) == 0);
+    pthread_join(thread, NULL); CHECK(receiver.valid);
+    close(sv[1]);
+    CHECK(th_ipc_send_timeout(sv[0], "closed", 6, 50) == -1);
+    CHECK_INT(errno, EPIPE);
+    close(sv[0]); free(data);
 }
 
 typedef struct {
@@ -178,12 +217,59 @@ static void test_socket(void)
     th_sb_free(&err);
 }
 
+static void test_saturated_listener(void)
+{
+    th_strbuf err; th_sb_init(&err);
+    int lfd = th_ipc_listen(sockpath, &err);
+    REQUIRE(lfd >= 0);
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    REQUIRE(strlen(sockpath) < sizeof addr.sun_path);
+    strcpy(addr.sun_path, sockpath);
+    int peers[128]; size_t n = 0;
+    while (n < 128) {
+        int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        REQUIRE(fd >= 0);
+        if (connect(fd, (struct sockaddr *)&addr, sizeof addr) != 0) {
+            CHECK_INT(errno, EAGAIN); close(fd); break;
+        }
+        peers[n++] = fd;
+    }
+    REQUIRE(n < 128 && n > 0);
+    struct stat before; REQUIRE(lstat(sockpath, &before) == 0);
+    /* A watchdog bounds the regression on the old blocking-connect code. */
+    pid_t child = fork(); REQUIRE(child >= 0);
+    if (child == 0) {
+        int probe = th_ipc_listen(sockpath, &err);
+        struct stat after;
+        bool intact = probe == -1 && errno == EADDRINUSE &&
+            lstat(sockpath, &after) == 0 && before.st_ino == after.st_ino;
+        _exit(intact ? 0 : 1);
+    }
+    int status = 0; pid_t done = 0;
+    int64_t deadline = th_mono_ms() + 1000;
+    while (!(done = waitpid(child, &status, WNOHANG)) && th_mono_ms() < deadline)
+        usleep(1000);
+    if (!done) { kill(child, SIGKILL); REQUIRE(waitpid(child, &status, 0) == child); }
+    CHECK(done == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    th_sb_reset(&err);
+    int64_t start = th_mono_ms();
+    /* Nonblocking probes also make clients fail promptly on a full backlog. */
+    if (done == child) {
+        CHECK(th_ipc_call(sockpath, "{}", 2, 50, &err) == NULL);
+        CHECK(th_mono_ms() - start < 500);
+    }
+    for (size_t i = 0; i < n; i++) close(peers[i]);
+    close(lfd); unlink(sockpath); th_sb_free(&err);
+}
+
 int main(void)
 {
     REQUIRE(mkdtemp(tmpdir));
     snprintf(sockpath, sizeof sockpath, "%s/run/treehoundd.sock", tmpdir);
     RUN(test_framing);
+    RUN(test_send_deadline);
     RUN(test_socket);
+    RUN(test_saturated_listener);
     char *dir = th_path_join(tmpdir, "run");
     rmdir(dir);
     free(dir);

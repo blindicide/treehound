@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- IPC sends and client calls now use monotonic deadlines across partial I/O. Saturated listener probes fail promptly without unlinking the live daemon socket; oversized client requests are rejected before connecting.
+
 - Live root loss retains Offline state and cached records. Watches are released for detached roots and moved-out directory subtrees; explicit verification reinstalls coverage after reconnection.
 
 - Atomic same-root file and directory replacements now preserve the moved source and descendant identities, deleting the replaced destination within the move transaction. Real inotify regression covers both cases.

@@ -15,6 +15,26 @@
 #include "treehound/common.h"
 #include "treehound/util.h"
 
+/* One monotonic deadline spans all retries; readiness is followed by
+ * nonblocking I/O so another consumer cannot turn a ready fd into a hang. */
+static int wait_io(int fd, short events, int64_t deadline)
+{
+    for (;;) {
+        int timeout = -1;
+        if (deadline > 0) {
+            int64_t left = deadline - th_mono_ms();
+            if (left <= 0) { errno = ETIMEDOUT; return -1; }
+            timeout = left > INT32_MAX ? INT32_MAX : (int)left;
+        }
+        struct pollfd pfd = {.fd = fd, .events = events};
+        int rc = poll(&pfd, 1, timeout);
+        if (rc > 0) return 0;
+        if (rc == 0) { errno = ETIMEDOUT; return -1; }
+        if (errno != EINTR) return -1;
+    }
+}
+static int connect_until(const char *path, th_strbuf *err, int64_t deadline);
+
 static int fill_addr(const char *path, struct sockaddr_un *sa, th_strbuf *err)
 {
     memset(sa, 0, sizeof *sa);
@@ -71,7 +91,17 @@ int th_ipc_listen(const char *path, th_strbuf *err)
             errno = EADDRINUSE;
             return -1;
         }
-        unlink(path); /* stale */
+        /* A full backlog, permissions or resource failure is not evidence
+         * that the existing daemon is dead. Never unlink a live endpoint. */
+        if (errno != ECONNREFUSED && errno != ENOENT) {
+            th_sb_printf(err, "socket is occupied or unavailable: %s", path);
+            errno = EADDRINUSE;
+            return -1;
+        }
+        if (unlink(path) != 0 && errno != ENOENT) {
+            th_sb_printf(err, "cannot remove stale socket: %s", strerror(errno));
+            return -1;
+        }
     }
 
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -112,48 +142,56 @@ int th_ipc_accept(int listen_fd)
     return fd;
 }
 
-int th_ipc_connect(const char *path, th_strbuf *err)
+static int connect_until(const char *path, th_strbuf *err, int64_t deadline)
 {
     struct sockaddr_un sa;
-    if (fill_addr(path, &sa, err) != 0)
-        return -1;
-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fill_addr(path, &sa, err) != 0) return -1;
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) {
-        if (err)
-            th_sb_printf(err, "socket: %s", strerror(errno));
+        if (err) th_sb_printf(err, "socket: %s", strerror(errno));
         return -1;
     }
-    int rc;
-    do {
-        rc = connect(fd, (struct sockaddr *)&sa, sizeof sa);
-    } while (rc != 0 && errno == EINTR);
+    int rc = connect(fd, (struct sockaddr *)&sa, sizeof sa);
+    if (rc != 0 && errno == EINPROGRESS) {
+        rc = wait_io(fd, POLLOUT, deadline);
+        if (rc == 0) {
+            int error = 0; socklen_t len = sizeof error;
+            rc = getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len);
+            if (rc == 0 && error) { errno = error; rc = -1; }
+        }
+    }
+    /* Unix-domain EAGAIN means a full listener queue: fail immediately. */
+    if (rc == 0) rc = fcntl(fd, F_SETFL, 0);
     if (rc != 0) {
         int e = errno;
-        if (err)
-            th_sb_printf(err, "cannot connect to %s: %s", path, strerror(e));
-        close(fd);
-        errno = e;
-        return -1;
+        if (err) th_sb_printf(err, "cannot connect to %s: %s", path, strerror(e));
+        close(fd); errno = e; return -1;
     }
     return fd;
 }
+int th_ipc_connect(const char *path, th_strbuf *err)
+{
+    return connect_until(path, err, th_mono_ms() + 5000);
+}
 
-static int write_all(int fd, const char *p, size_t n)
+static int write_all(int fd, const char *p, size_t n, int64_t deadline)
 {
     while (n) {
-        ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
+        if (wait_io(fd, POLLOUT, deadline) != 0) return -1;
+        ssize_t w = send(fd, p, n, MSG_NOSIGNAL | MSG_DONTWAIT);
         if (w < 0) {
-            if (errno == EINTR)
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 continue;
             return -1;
         }
+        if (w == 0) { errno = EPIPE; return -1; }
         p += w;
         n -= (size_t)w;
     }
     return 0;
 }
 
-int th_ipc_send(int fd, const char *data, size_t len)
+static int send_until(int fd, const char *data, size_t len, int64_t deadline)
 {
     if (len > TH_IPC_MAX_RESPONSE || len > UINT32_MAX) {
         errno = EMSGSIZE;
@@ -161,9 +199,18 @@ int th_ipc_send(int fd, const char *data, size_t len)
     }
     unsigned char hdr[4] = {(unsigned char)(len >> 24), (unsigned char)(len >> 16),
                             (unsigned char)(len >> 8), (unsigned char)len};
-    if (write_all(fd, (const char *)hdr, 4) != 0)
+    if (write_all(fd, (const char *)hdr, 4, deadline) != 0)
         return -1;
-    return write_all(fd, data, len);
+    return write_all(fd, data, len, deadline);
+}
+
+int th_ipc_send_timeout(int fd, const char *data, size_t len, int timeout_ms)
+{
+    return send_until(fd, data, len, timeout_ms > 0 ? th_mono_ms() + timeout_ms : 0);
+}
+int th_ipc_send(int fd, const char *data, size_t len)
+{
+    return th_ipc_send_timeout(fd, data, len, 5000);
 }
 
 /* Reads exactly n bytes.  Returns n, the short count at EOF, or -1. */
@@ -171,27 +218,10 @@ static ssize_t read_full(int fd, char *p, size_t n, int64_t deadline)
 {
     size_t got = 0;
     while (got < n) {
-        if (deadline > 0) {
-            int64_t left = deadline - th_mono_ms();
-            if (left <= 0) {
-                errno = ETIMEDOUT;
-                return -1;
-            }
-            struct pollfd pfd = {.fd = fd, .events = POLLIN};
-            int pr = poll(&pfd, 1, left > INT32_MAX ? INT32_MAX : (int)left);
-            if (pr < 0) {
-                if (errno == EINTR)
-                    continue;
-                return -1;
-            }
-            if (pr == 0) {
-                errno = ETIMEDOUT;
-                return -1;
-            }
-        }
-        ssize_t r = recv(fd, p + got, n - got, 0);
+        if (wait_io(fd, POLLIN, deadline) != 0) return -1;
+        ssize_t r = recv(fd, p + got, n - got, MSG_DONTWAIT);
         if (r < 0) {
-            if (errno == EINTR)
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 continue;
             return -1;
         }
@@ -202,11 +232,10 @@ static ssize_t read_full(int fd, char *p, size_t n, int64_t deadline)
     return (ssize_t)got;
 }
 
-int th_ipc_recv(int fd, size_t max, int timeout_ms, char **out, size_t *len)
+static int recv_until(int fd, size_t max, int64_t deadline, char **out, size_t *len)
 {
     *out = NULL;
     *len = 0;
-    int64_t deadline = timeout_ms > 0 ? th_mono_ms() + timeout_ms : 0;
     unsigned char hdr[4];
     ssize_t r = read_full(fd, (char *)hdr, 4, deadline);
     if (r < 0)
@@ -236,20 +265,31 @@ int th_ipc_recv(int fd, size_t max, int timeout_ms, char **out, size_t *len)
     return 0;
 }
 
+int th_ipc_recv(int fd, size_t max, int timeout_ms, char **out, size_t *len)
+{
+    return recv_until(fd, max, timeout_ms > 0 ? th_mono_ms() + timeout_ms : 0, out, len);
+}
+
 th_jval *th_ipc_call(const char *socket_path, const char *request, size_t len, int timeout_ms,
                      th_strbuf *err)
 {
-    int fd = th_ipc_connect(socket_path, err);
+    if (len > TH_IPC_MAX_REQUEST) {
+        errno = EMSGSIZE;
+        th_sb_puts(err, "request exceeds IPC size limit");
+        return NULL;
+    }
+    int64_t deadline = timeout_ms > 0 ? th_mono_ms() + timeout_ms : 0;
+    int fd = connect_until(socket_path, err, deadline);
     if (fd < 0)
         return NULL;
-    if (th_ipc_send(fd, request, len) != 0) {
+    if (send_until(fd, request, len, deadline) != 0) {
         th_sb_printf(err, "cannot send request: %s", strerror(errno));
         close(fd);
         return NULL;
     }
     char *resp;
     size_t rlen;
-    int rc = th_ipc_recv(fd, TH_IPC_MAX_RESPONSE, timeout_ms, &resp, &rlen);
+    int rc = recv_until(fd, TH_IPC_MAX_RESPONSE, deadline, &resp, &rlen);
     int e = errno;
     close(fd);
     if (rc != 0) {

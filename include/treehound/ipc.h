@@ -30,8 +30,10 @@ int th_ipc_accept(int listen_fd);
 /* Connects to the daemon socket.  Returns the fd or -1. */
 int th_ipc_connect(const char *path, th_strbuf *err);
 
-/* Sends one framed message.  Returns 0 or -1. */
+/* Sends one framed message with a five-second deadline. Returns 0 or -1. */
 int th_ipc_send(int fd, const char *data, size_t len);
+/* Explicit send deadline; timeout_ms <= 0 waits forever. ETIMEDOUT on expiry. */
+int th_ipc_send_timeout(int fd, const char *data, size_t len, int timeout_ms);
 
 /* Receives one framed message of at most max bytes into a NUL-terminated heap
  * buffer.  timeout_ms <= 0 waits forever.  Returns 0 on success, 1 on a clean
@@ -40,7 +42,8 @@ int th_ipc_send(int fd, const char *data, size_t len);
 int th_ipc_recv(int fd, size_t max, int timeout_ms, char **out, size_t *len);
 
 /* Client helper: connects, sends request, waits for the response and parses
- * it.  Returns the parsed response or NULL with a message in err. */
+ * it. One deadline spans connection, send and receive. Returns the parsed
+ * response or NULL with a message in err. */
 th_jval *th_ipc_call(const char *socket_path, const char *request, size_t len, int timeout_ms,
                      th_strbuf *err);
 
