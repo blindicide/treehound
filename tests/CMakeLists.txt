@@ -7,3 +7,4 @@ function(th_unit_test name)
 endfunction()
 
 th_unit_test(test_core th_base)
+th_unit_test(test_db th_engine)

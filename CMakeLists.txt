@@ -52,6 +52,12 @@ target_include_directories(th_base PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include)
 
+# ---- th_engine: database, indexer and search; only treehoundd links it -----
+add_library(th_engine STATIC
+    src/database/db.c
+)
+target_link_libraries(th_engine PUBLIC th_base SQLite::SQLite3 Threads::Threads)
+
 if(TREEHOUND_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
