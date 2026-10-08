@@ -74,6 +74,7 @@ struct th_jval {
 /* Parses len bytes.  Returns NULL on error and sets *err to a static message. */
 th_jval *th_json_parse(const char *text, size_t len, const char **err);
 void th_json_free(th_jval *v);
+void th_json_write_value(th_jw *w, const th_jval *v);
 
 const th_jval *th_json_get(const th_jval *obj, const char *key);
 /* Convenience accessors returning def when absent or of the wrong type. */

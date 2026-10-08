@@ -13,5 +13,5 @@ th_unit_test(test_indexer th_engine)
 th_unit_test(test_search th_engine)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME integration.daemon COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/integration/daemon.py $<TARGET_FILE:treehoundd>)
+    ${CMAKE_CURRENT_SOURCE_DIR}/integration/daemon.py $<TARGET_FILE:treehoundd> $<TARGET_FILE:treehound>)
 set_tests_properties(integration.daemon PROPERTIES LABELS integration TIMEOUT 60)

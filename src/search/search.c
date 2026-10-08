@@ -41,6 +41,8 @@ void th_search_opts_init(th_search_opts *o)
     o->min_size = o->max_size = -1;
     o->min_mtime = o->max_mtime = -1;
     o->limit = 100;
+    o->parent_id = -1;
+    o->show_hidden = true;
     o->sort = TH_SORT_NAME;
 }
 
@@ -229,14 +231,19 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
     res->total = -1;
 
     term_list terms = {0};
-    parse_terms(o->query, &terms);
+    if ((o->match_flags & TH_MATCH_FULL) && o->query && *o->query) {
+        terms.v = th_xmalloc(sizeof *terms.v);
+        terms.n = terms.cap = 1;
+        terms.v[0] = (term){th_xstrdup(o->query), strlen(o->query), false, strchr(o->query, '/') != NULL};
+    } else parse_terms(o->query, &terms);
     if (terms.n > 24) {
         terms_free(&terms);
         th_sb_puts(err, "too many search terms (at most 24)");
         return -1;
     }
 
-    th_strbuf fts, where, lo, hi, sql;
+    th_strbuf fts, where, lo, hi, sql, extension;
+    th_sb_init(&extension);
     th_sb_init(&fts);
     th_sb_init(&where);
     th_sb_init(&lo);
@@ -256,6 +263,23 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
                      terms.v[i].path ? "path" : "name");
         push_text(&params, terms.v[i].s, terms.v[i].len);
         push_int(&params, o->match_flags);
+    }
+    if (o->parent_id >= 0) {
+        th_sb_puts(&where, " AND e.parent_id = ?");
+        push_int(&params, o->parent_id);
+    }
+    if (!o->show_hidden) th_sb_puts(&where, " AND substr(CAST(e.name AS BLOB),1,1) != x'2e'");
+    if (o->extension && *o->extension) {
+        th_sb_puts(&extension, "*.");
+        const char *ext = o->extension;
+        if (*ext == '.') ext++;
+        for (; *ext; ext++) {
+            if (*ext == '*' || *ext == '?' || *ext == '\\') th_sb_putc(&extension, '\\');
+            th_sb_putc(&extension, *ext);
+        }
+        th_sb_puts(&where, " AND th_match(?, e.name, ?)");
+        push_text(&params, extension.data, extension.len);
+        push_int(&params, o->match_flags | TH_MATCH_FULL);
     }
     unsigned types = o->types & TH_TYPEMASK_ALL;
     if (types && types != TH_TYPEMASK_ALL) {
@@ -372,6 +396,7 @@ out:
     th_sb_free(&lo);
     th_sb_free(&hi);
     th_sb_free(&sql);
+    th_sb_free(&extension);
     terms_free(&terms);
     return rc;
 }

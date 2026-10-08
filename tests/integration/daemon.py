@@ -51,6 +51,20 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         assert roots[0]["files"] == 5, roots  # pathname count includes hardlinks and symlink
         r = call("search", query="hello")
         assert r["ok"] and r["used_index"] and len(r["items"]) == 1, r
+        assert len(call("list", parent_id=roots[0]["entry_id"])["items"]) == 6
+        assert not call("list")["ok"]
+        assert call("search", query="hello space.txt", exact=True)["items"][0]["name"] == "hello space.txt"
+        assert not call("search", query="hello", exact=True)["items"]
+        assert call("search", extension="pdf")["items"][0]["name"] == "unicodé.pdf"
+        def cli(*args):
+            return subprocess.run([sys.argv[2], *args, "--socket", sockpath], capture_output=True, timeout=10)
+        c = cli("search", "bad", "--json")
+        assert c.returncode == 0 and json.loads(c.stdout)["items"][0]["name"] == "bad\udcff.txt", c
+        assert cli("search", "no-match-ever").returncode == 1
+        assert cli("search", "hello", "other").returncode == 2
+        assert cli("status", "--wait").returncode == 2
+        c = cli("verify", "--wait", "--json")
+        assert c.returncode == 0, c
         assert call("search", query="*.pdf")["items"][0]["name"] == "unicodé.pdf"
         assert call("search", query="bad")["items"][0]["name"] == "bad\udcff.txt"
         assert not call("search", query="\u0000")["ok"]

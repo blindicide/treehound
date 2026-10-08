@@ -42,3 +42,7 @@ reconciliation are tested. CLI/GTK client, visual analysis, history, CI and
 release packaging remain pending. Kernel overflow, special filesystems and
 mount namespace behavior still need dedicated validation. This increment is
 not a finished release.
+
+## Command-line client
+
+`treehound search QUERY` and `status`, `roots`, `scan`, `verify`, `rebuild`, and `config` use only framed daemon IPC. `--json` preserves byte escapes. Search supports `--exact` (the whole query is a name or path), literal `--extension`, case/type/size/mtime/subtree filters, pagination and sorting. `--wait` on scan commands waits for the FIFO completion watermark and checks root consistency; an offline or stale root returns failure. Exit codes are 0 success, 1 no matches, 2 invalid usage, 3 unavailable daemon, 4 operation failure.

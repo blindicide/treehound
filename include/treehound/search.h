@@ -47,6 +47,9 @@ typedef struct {
     int64_t max_mtime;
     int64_t root_id;   /* 0: all roots */
     const char *under; /* only entries strictly below this directory */
+    int64_t parent_id; /* -1: any; otherwise immediate children */
+    const char *extension; /* literal extension, without leading dot */
+    bool show_hidden;
     th_sort_key sort;
     bool descending;
     int64_t offset;

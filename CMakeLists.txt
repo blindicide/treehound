@@ -66,6 +66,10 @@ add_executable(treehoundd src/daemon/main.c src/daemon/handlers.c src/daemon/sca
 target_link_libraries(treehoundd PRIVATE th_engine)
 install(TARGETS treehoundd RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+add_executable(treehound src/cli/main.c)
+target_link_libraries(treehound PRIVATE th_base)
+install(TARGETS treehound RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 if(TREEHOUND_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

@@ -25,7 +25,7 @@ void th_pattern_compile(th_pattern *p, const char *pat, size_t len, int flags)
     p->cps = th_xmalloc((len + 1) * sizeof *p->cps);
     p->lit = th_xmalloc((len + 1) * sizeof *p->lit);
     p->n = 0;
-    p->glob = false;
+    p->glob = (flags & TH_MATCH_FULL) != 0;
     p->flags = flags;
     size_t i = 0;
     while (i < len) {

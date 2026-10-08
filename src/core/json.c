@@ -565,3 +565,21 @@ double th_json_get_double(const th_jval *obj, const char *key, double def)
     const th_jval *v = th_json_get(obj, key);
     return (v && v->type == TH_JNUM) ? v->num : def;
 }
+
+void th_json_write_value(th_jw *w, const th_jval *v)
+{
+    switch (v->type) {
+    case TH_JNULL: th_jw_null(w); break;
+    case TH_JBOOL: th_jw_bool(w, v->b); break;
+    case TH_JNUM: if (v->is_int) th_jw_int(w, v->i); else th_jw_double(w, v->num); break;
+    case TH_JSTR: th_jw_bytes(w, v->str, v->len); break;
+    case TH_JARR:
+        th_jw_arr_begin(w);
+        for (size_t i = 0; i < v->n; i++) th_json_write_value(w, &v->items[i]);
+        th_jw_arr_end(w); break;
+    case TH_JOBJ:
+        th_jw_obj_begin(w);
+        for (size_t i = 0; i < v->n; i++) { th_jw_key(w, v->keys[i]); th_json_write_value(w, &v->items[i]); }
+        th_jw_obj_end(w); break;
+    }
+}

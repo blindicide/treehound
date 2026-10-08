@@ -15,6 +15,7 @@
  */
 
 enum {
+    TH_MATCH_FULL = 1 << 1, /* anchored literal or glob */
     TH_MATCH_CASE = 1 << 0, /* case-sensitive */
 };
 

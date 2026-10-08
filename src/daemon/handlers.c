@@ -80,6 +80,12 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
         th_search_opts o; th_search_opts_init(&o);
         o.query = th_json_get_str(q, "query", "");
         o.under = th_json_get_str(q, "under", NULL);
+        o.extension = th_json_get_str(q, "extension", NULL);
+        o.show_hidden = th_json_get_bool(q, "show_hidden", true);
+        if (!strcmp(cmd, "list")) {
+            o.parent_id = th_json_get_int(q, "parent_id", -1);
+            if (o.parent_id < 0) { failure(out, "request", "list requires parent_id"); goto done; }
+        }
         o.root_id = th_json_get_int(q, "root_id", 0);
         o.min_size = th_json_get_int(q, "min_size", -1); o.max_size = th_json_get_int(q, "max_size", -1);
         o.min_mtime = th_json_get_int(q, "min_mtime", -1); o.max_mtime = th_json_get_int(q, "max_mtime", -1);
@@ -89,6 +95,7 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
         pthread_mutex_lock(&d->mu);
         o.match_flags = th_json_get_bool(q, "case_sensitive", d->cfg.case_sensitive) ? TH_MATCH_CASE : 0;
         pthread_mutex_unlock(&d->mu);
+        if (th_json_get_bool(q, "exact", false)) o.match_flags |= TH_MATCH_FULL;
         const char *type = th_json_get_str(q, "type", "all");
         o.types = !strcmp(type, "file") ? TH_TYPEMASK(TH_TYPE_FILE) : !strcmp(type, "dir") ? TH_TYPEMASK(TH_TYPE_DIR) : TH_TYPEMASK_ALL;
         if (!th_sort_parse(th_json_get_str(q, "sort", "name"), &o.sort) || o.offset < 0 ||
