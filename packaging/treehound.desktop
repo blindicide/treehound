@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Treehound
+Comment=Indexed filename search and disk usage
+Exec=treehound
+Icon=treehound
+Terminal=false
+Categories=Utility;System;GTK;
+Keywords=disk;files;search;storage;
+StartupNotify=true

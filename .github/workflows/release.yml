@@ -1,0 +1,83 @@
+name: Packages and release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:13
+            format: DEB
+          - image: fedora:44
+            format: RPM
+    container: ${{ matrix.image }}
+    steps:
+      - name: Native build dependencies
+        shell: bash
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            apt-get install -y git gcc cmake make pkg-config libgtk-4-dev libsqlite3-dev python3 xvfb xauth dbus-x11 procps dpkg-dev
+          else
+            dnf install -y git gcc cmake make pkgconf-pkg-config gtk4-devel sqlite-devel python3 xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon procps-ng rpm-build
+          fi
+      - uses: actions/checkout@v4
+      - name: Check authoritative version and tag
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -nE 's/^[[:space:]]*VERSION ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' CMakeLists.txt)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Build and test every target
+        shell: bash
+        run: |
+          cmake -S . -B build -DTREEHOUND_WERROR=ON -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build -j2
+          ctest --test-dir build --output-on-failure
+      - name: Generate and validate native package
+        shell: bash
+        run: |
+          cd build
+          cpack -G '${{ matrix.format }}'
+          cd ..
+          package=$(find build -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \))
+          bash scripts/validate-package.sh '${{ matrix.format }}' "$package" '${{ steps.version.outputs.value }}'
+          mkdir -p artifacts
+          cp "$package" artifacts/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.format }}
+          path: artifacts/*
+          if-no-files-found: error
+  publish:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: artifacts
+      - name: Publish both validated formats with checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          test "$(find artifacts -name '*.deb' | wc -l)" = 1
+          test "$(find artifacts -name '*.rpm' | wc -l)" = 1
+          (cd artifacts && sha256sum *.deb *.rpm > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" artifacts/* --verify-tag --title "Treehound $GITHUB_REF_NAME" --notes-file CHANGELOG.md

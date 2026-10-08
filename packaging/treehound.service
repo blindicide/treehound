@@ -1,0 +1,14 @@
+[Unit]
+Description=Treehound indexed file search daemon
+Documentation=https://github.com/blindicide/treehound
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/treehoundd
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
