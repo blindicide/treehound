@@ -5,6 +5,7 @@
 #include "treehound/db.h"
 #include "treehound/match.h"
 #include "treehound/search.h"
+#include "treehound/mounts.h"
 #include "treehound/util.h"
 #include <stdlib.h>
 #include <string.h>
@@ -129,9 +130,45 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
         monitor_force(id);
         uint64_t seq = id ? daemon_enqueue(d, !strcmp(cmd, "rebuild") ? JOB_REBUILD : JOB_SCAN, id, false) : daemon_enqueue_all(d, *db);
         th_jw_kv_int(&w, "seq", (int64_t)seq);
+    } else if (!strcmp(cmd, "mounts")) {
+        th_mounts mounts;
+        if (th_mounts_load(&mounts, NULL) != 0) { failure(out, "mounts", "cannot read mountinfo"); goto done; }
+        th_jw_key(&w, "mounts"); th_jw_arr_begin(&w);
+        for (size_t i = 0; i < mounts.n; i++) {
+            th_mount *mount = &mounts.v[i];
+            if (th_fstype_is_pseudo(mount->fstype)) continue;
+            th_jw_obj_begin(&w); th_jw_kv_str(&w, "path", mount->mnt);
+            th_jw_kv_str(&w, "filesystem", mount->fstype);
+            th_jw_kv_bool(&w, "accessible", access(mount->mnt, R_OK | X_OK) == 0);
+            th_jw_obj_end(&w);
+        }
+        th_jw_arr_end(&w); th_mounts_free(&mounts);
+    } else if (!strcmp(cmd, "config_save")) {
+        const th_jval *text = th_json_get(q, "config");
+        if (!text || text->type != TH_JSTR) { failure(out, "request", "config must be text"); goto done; }
+        th_config next; th_config_defaults(&next);
+        if (th_config_parse(&next, text->str, text->len, &err) != 0) {
+            failure(out, "config", err.data ? err.data : "invalid configuration"); th_config_free(&next); goto done;
+        }
+        pthread_mutex_lock(&d->mu);
+        bool restart = next.watch != d->cfg.watch;
+        if (th_config_save(&next, d->config_path) != 0) {
+            pthread_mutex_unlock(&d->mu); th_config_free(&next); failure(out, "config", "could not save configuration"); goto done;
+        }
+        next.watch = d->cfg.watch; /* watch thread lifecycle changes require daemon restart */
+        th_config old = d->cfg; d->cfg = next;
+        pthread_mutex_unlock(&d->mu); th_config_free(&old);
+        monitor_force(0);
+        daemon_enqueue(d, JOB_SYNC, 0, false);
+        uint64_t seq = daemon_enqueue_all(d, *db);
+        th_jw_kv_int(&w, "seq", (int64_t)seq); th_jw_kv_bool(&w, "restart_required", restart);
     } else if (!strcmp(cmd, "config")) {
         th_strbuf cfg; th_sb_init(&cfg);
-        pthread_mutex_lock(&d->mu); th_config_serialize(&d->cfg, &cfg); pthread_mutex_unlock(&d->mu);
+        pthread_mutex_lock(&d->mu);
+        th_config saved; th_config_defaults(&saved);
+        if (th_config_load(&saved, d->config_path, &err) == 0) th_config_serialize(&saved, &cfg);
+        else th_config_serialize(&d->cfg, &cfg);
+        th_config_free(&saved); pthread_mutex_unlock(&d->mu);
         th_jw_kv_str(&w, "config", cfg.data ? cfg.data : ""); th_sb_free(&cfg);
     } else if (!strcmp(cmd, "shutdown")) {
         uint64_t one = 1; (void)!write(d->wake_fd, &one, sizeof one);

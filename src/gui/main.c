@@ -17,7 +17,7 @@ typedef struct {
 typedef struct { int64_t root, parent, size; char *path; } Location;
 typedef struct {
     GtkApplication *app;
-    GtkWidget *window, *roots, *search, *status, *breadcrumb, *view;
+    GtkWidget *window, *roots, *search, *status, *breadcrumb, *view, *settings, *config_text;
     GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before;
     GtkDropDown *sort, *types;
     GListStore *model;
@@ -30,6 +30,7 @@ typedef struct {
 } Ui;
 typedef struct { char *request, *socket; guint generation, kind; bool start; } Work;
 static void query(Ui *u);
+static void show_settings(Ui *u, const char *text);
 static void submit(Ui *u, char *request, guint kind);
 static void row_free(gpointer data)
 {
@@ -161,6 +162,12 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
                 if (u->smoke_stage == 1) gtk_editable_set_text(GTK_EDITABLE(u->search), "smoke");
                 else if (u->smoke_stage == 2) g_application_quit(G_APPLICATION(u->app));
             }
+        } else if (w->kind == 4) {
+            show_settings(u, th_json_get_str(res, "config", ""));
+        } else if (w->kind == 5) {
+            gtk_label_set_text(GTK_LABEL(u->status), th_json_get_bool(res, "restart_required", false) ?
+                "Saved; restart daemon to change watch coverage. Other changes reconcile now." : "Saved; roots and exclusions are reconciling. Reopen to refresh sidebar.");
+            if (u->settings) { gtk_window_destroy(GTK_WINDOW(u->settings)); u->settings = NULL; }
         } else { gtk_label_set_text(GTK_LABEL(u->status), "Verification queued; refresh to view progress."); }
     }
     th_json_free(res); g_clear_error(&error);
@@ -254,6 +261,39 @@ static void verify(GtkButton *button, gpointer data)
 {
     (void)button; Ui *u = data; char *request = g_strdup_printf("{\"v\":1,\"cmd\":\"verify\",\"root_id\":%lld}", (long long)u->root); submit(u, request, 3);
 }
+static void save_settings(GtkButton *button, gpointer data)
+{
+    (void)button; Ui *u = data; GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(u->config_text));
+    GtkTextIter start, end; gtk_text_buffer_get_bounds(buffer, &start, &end);
+    char *text = gtk_text_buffer_get_text(buffer, &start, &end, false);
+    th_strbuf b; th_sb_init(&b); th_jw w; th_jw_init(&w, &b); th_jw_obj_begin(&w);
+    th_jw_kv_int(&w, "v", 1); th_jw_kv_str(&w, "cmd", "config_save"); th_jw_kv_str(&w, "config", text); th_jw_obj_end(&w);
+    submit(u, g_strdup(b.data), 5); th_sb_free(&b); g_free(text);
+}
+static gboolean settings_closed(GtkWindow *window, gpointer data)
+{
+    (void)window; Ui *u = data; u->settings = NULL; return FALSE;
+}
+static void show_settings(Ui *u, const char *text)
+{
+    if (u->settings) { gtk_window_present(GTK_WINDOW(u->settings)); return; }
+    u->settings = gtk_window_new(); gtk_window_set_transient_for(GTK_WINDOW(u->settings), GTK_WINDOW(u->window));
+    gtk_window_set_modal(GTK_WINDOW(u->settings), true); gtk_window_set_title(GTK_WINDOW(u->settings), "Treehound configuration");
+    gtk_window_set_default_size(GTK_WINDOW(u->settings), 620, 500);
+    g_signal_connect(u->settings, "close-request", G_CALLBACK(settings_closed), u);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8); gtk_window_set_child(GTK_WINDOW(u->settings), box);
+    gtk_box_append(GTK_BOX(box), gtk_label_new("Roots/exclusions, mount crossing, reconciliation and retention.\nWatch changes require daemon restart. Background service is enabled\nonly by running: systemctl --user enable --now treehound.service"));
+    u->config_text = gtk_text_view_new(); gtk_text_view_set_monospace(GTK_TEXT_VIEW(u->config_text), true);
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(u->config_text)), text, -1);
+    GtkWidget *scroll = gtk_scrolled_window_new(); gtk_widget_set_vexpand(scroll, true);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), u->config_text); gtk_box_append(GTK_BOX(box), scroll);
+    GtkWidget *save = gtk_button_new_with_label("Save and reconcile"); g_signal_connect(save, "clicked", G_CALLBACK(save_settings), u); gtk_box_append(GTK_BOX(box), save);
+    gtk_window_present(GTK_WINDOW(u->settings));
+}
+static void settings(GtkButton *button, gpointer data)
+{
+    (void)button; submit(data, g_strdup("{\"v\":1,\"cmd\":\"config\"}"), 4);
+}
 static GtkWidget *entry(GtkWidget *box, const char *placeholder, Ui *u)
 {
     GtkWidget *w = gtk_entry_new(); gtk_entry_set_placeholder_text(GTK_ENTRY(w), placeholder); gtk_widget_set_size_request(w, 95, -1);
@@ -276,6 +316,7 @@ static void activate(GtkApplication *app, gpointer data)
     gtk_box_append(GTK_BOX(toolbar), gtk_label_new("Treehound " TH_VERSION));
     u->search = gtk_search_entry_new(); gtk_widget_set_hexpand(u->search, true); gtk_box_append(GTK_BOX(toolbar), u->search);
     g_signal_connect(u->search, "search-changed", G_CALLBACK(changed), u);
+    button(toolbar, "Settings", G_CALLBACK(settings), u);
     button(toolbar, "Verify", G_CALLBACK(verify), u); button(toolbar, "Refresh", G_CALLBACK(refresh), u);
     GtkWidget *filters = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6); gtk_box_append(GTK_BOX(box), filters);
     const char *sorts[] = {"Name", "Size", "Path", "Modified", "Type", NULL};

@@ -94,6 +94,11 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         raise AssertionError(f"live query {query}: expected {count}, got {result}")
     try:
         assert call("status")["live_indexing"]
+        assert call("mounts")["ok"]
+        assert not call("config_save", config="watch = maybe")["ok"]
+        saved = call("config_save", config=f"root = {root}\nwatch = true\nreconcile_interval_hours = 0\n")
+        assert saved["ok"] and not saved["restart_required"]
+        wait_idle()
         assert call("search", query="offline")["items"]
         (root / "live.txt").write_bytes(b"live")
         assert eventually("live.txt", 1)[0]["size"] == 4
