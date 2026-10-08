@@ -245,6 +245,13 @@ static void test_config(void)
     th_config_free(&c);
     th_config_free(&c2);
     th_config_free(&c3);
+    th_config_defaults(&c3);th_sb_reset(&err);
+    const char *overlap="root = /a\nroot = /a/b\n";
+    CHECK_INT(th_config_parse(&c3,overlap,strlen(overlap),&err),-1);
+    CHECK(strstr(err.data,"overlapping roots")!=NULL);th_config_free(&c3);
+    th_config_defaults(&c3);th_sb_reset(&err);
+    const char *disjoint="root = /a\nroot = /ab\n";
+    CHECK_INT(th_config_parse(&c3,disjoint,strlen(disjoint),&err),0);th_config_free(&c3);
     th_sb_free(&out);
     th_sb_free(&err);
 }

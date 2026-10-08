@@ -175,6 +175,16 @@ int th_config_parse(th_config *c, const char *text, size_t len, th_strbuf *err)
             rc = -1;
         }
     }
+    /* Paths are globally unique in the index; overlapping roots would steal
+     * entry ownership and produce inconsistent totals. Validate the final set. */
+    for(size_t i=0;i<c->nroots;i++)for(size_t j=i+1;j<c->nroots;j++) {
+        const char *a=c->roots[i],*b=c->roots[j];size_t al=strlen(a),bl=strlen(b);
+        if((al<bl && !memcmp(a,b,al) && (al==1 || b[al]=='/')) ||
+           (bl<al && !memcmp(a,b,bl) && (bl==1 || a[bl]=='/'))) {
+            if(err)th_sb_printf(err,"overlapping roots: %s and %s; select disjoint roots\n",a,b);
+            rc=-1;
+        }
+    }
     free(copy);
     return rc;
 }
