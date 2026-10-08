@@ -8,10 +8,10 @@ version=$3
 previous=${4:-}
 if [[ -n "$previous" ]]; then
   case "$format" in
-    DEB) dpkg -i "$previous" ;;
-    RPM) rpm -Uvh "$previous" ;;
+    DEB) previous_version=$(dpkg-deb -f "$previous" Version); dpkg -i "$previous" ;;
+    RPM) previous_version=$(rpm -qp --queryformat '%{VERSION}' "$previous"); rpm -Uvh "$previous" ;;
   esac
-  test "$(treehound --version)" = "treehound 0.4.0"
+  test "$(treehound --version)" = "treehound $previous_version"
   python3 tests/integration/package_upgrade.py prepare /usr/bin/treehoundd build-package-upgrade
 fi
 case "$format" in
