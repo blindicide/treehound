@@ -23,4 +23,4 @@ with tempfile.TemporaryDirectory(prefix="th-gui-") as tmp:
         assert not any(b"CRITICAL" in line or b"WARNING" in line for line in app_diagnostics), gui.stderr
     finally:
         daemon.terminate(); assert daemon.wait(timeout=5) == 0
-print("GTK browse/search integration passed")
+print("GTK browse/search/treemap navigation integration passed")

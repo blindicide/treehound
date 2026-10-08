@@ -8,18 +8,21 @@
 #include "treehound/json.h"
 #include "treehound/strbuf.h"
 #include "treehound/util.h"
+#include "treehound/treemap.h"
 
 typedef struct {
     int64_t id, parent, root, size;
     char *path, *type, *text[8];
     double fraction;
 } Row;
+typedef struct { Row *row; double weight; th_rect rect; } Tile;
 typedef struct { int64_t root, parent, size; char *path; } Location;
 typedef struct {
     GtkApplication *app;
     GtkWidget *window, *roots, *search, *status, *breadcrumb, *view, *settings, *config_text;
     GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before, *exact, *global;
-    GtkDropDown *sort, *types;
+    GtkDropDown *sort, *types, *metric;
+    GtkWidget *stack, *map; GArray *tiles;
     GListStore *model;
     GtkSingleSelection *selection;
     char *socket, *path, *pending;
@@ -129,6 +132,97 @@ static void populate(Ui *u, const th_jval *items)
         g_list_store_append(u->model, obj); g_object_unref(obj);
     }
 }
+static void map_clear(Ui *u)
+{
+    for (guint i = 0; i < u->tiles->len; i++) row_free(g_array_index(u->tiles, Tile, i).row);
+    g_array_set_size(u->tiles, 0);
+}
+static void map_populate(Ui *u, const th_jval *res)
+{
+    map_clear(u); const th_jval *items = th_json_get(res, "items");
+    bool allocated = !strcmp(th_json_get_str(res, "metric", "allocated"), "allocated");
+    int64_t other = th_json_get_int(res, "other_count", 0);
+    double remainder = (double)th_json_get_int(res, "other_weight", 0), total = (double)th_json_get_int(res, "total_weight", 0);
+    if (items) for (size_t i = 0; i < items->n; i++) {
+        const th_jval *v = &items->items[i]; Row *r = g_new0(Row, 1);
+        r->id = th_json_get_int(v, "id", 0); r->root = th_json_get_int(v, "root_id", 0);
+        r->path = th_xstrdup(th_json_get_str(v, "path", "")); r->type = th_xstrdup(th_json_get_str(v, "type", ""));
+        r->size = th_json_get_int(v, "size", 0); r->text[0] = g_utf8_make_valid(th_json_get_str(v, "name", ""), -1);
+        double weight = (double)th_json_get_int(v, allocated ? "allocated" : "size", 0);
+        if (strcmp(r->type, "dir") && (th_json_get_int(v, "flags", 0) & 8)) weight = 0;
+        if (weight < total * .001) { other++; remainder += MAX(weight,0.); row_free(r); continue; }
+        Tile tile = {.row = r, .weight = MAX(weight, 0.)}; g_array_append_val(u->tiles, tile);
+    }
+    if (other) {
+        Row *r = g_new0(Row, 1); r->text[0] = g_strdup_printf("Other %lld items", (long long)other);
+        r->path = th_xstrdup(u->path); r->type = th_xstrdup("aggregate");
+        Tile tile = {.row = r, .weight = remainder}; g_array_append_val(u->tiles, tile);
+    }
+    char *size = g_format_size((guint64)MAX(th_json_get_int(res, "total_weight", 0), 0));
+    char *text = g_strdup_printf("%lld children · %s %s · %s · up to 512 largest items; remainder aggregated",
+        (long long)th_json_get_int(res, "children", 0), size, allocated ? "allocated" : "logical", th_json_get_str(res, "status", "indexed"));
+    gtk_label_set_text(GTK_LABEL(u->status), text); g_free(size); g_free(text); gtk_widget_queue_draw(u->map);
+}
+static gboolean map_smoke_navigate(gpointer data);
+static void map_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data)
+{
+    (void)area; Ui *u = data; size_t n = u->tiles->len; double weights[513]; th_rect rectangles[513];
+    for (size_t i = 0; i < n; i++) weights[i] = g_array_index(u->tiles, Tile, i).weight;
+    th_treemap(weights, n, (th_rect){0,0,(double)width,(double)height}, rectangles);
+    bool any = false;
+    for (size_t i = 0; i < n; i++) {
+        Tile *t = &g_array_index(u->tiles, Tile, i); t->rect = rectangles[i]; th_rect r = t->rect;
+        if (r.width < 1 || r.height < 1) continue;
+        any = true; const char *extension = strrchr(t->row->text[0], '.');
+        guint hash = g_str_hash(extension ? extension : t->row->type);
+        double tint = (double)(hash % 100) / 250.;
+        if (!strcmp(t->row->type, "dir")) cairo_set_source_rgb(cr, .15, .38+tint, .65);
+        else if (!t->row->id) cairo_set_source_rgb(cr, .45, .45, .45);
+        else cairo_set_source_rgb(cr, .32+tint, .52, .28+tint);
+        cairo_rectangle(cr, r.x+1, r.y+1, MAX(r.width-2,0), MAX(r.height-2,0)); cairo_fill(cr);
+        if (r.width > 65 && r.height > 25) {
+            cairo_save(cr); cairo_rectangle(cr,r.x+4,r.y+4,r.width-8,r.height-8); cairo_clip(cr);
+            cairo_set_source_rgb(cr,1,1,1); cairo_move_to(cr,r.x+7,r.y+18); cairo_set_font_size(cr,12); cairo_show_text(cr,t->row->text[0]); cairo_restore(cr);
+        }
+    }
+    if (u->smoke && u->smoke_stage == 3) { u->smoke_stage = 4; g_idle_add(map_smoke_navigate, u); }
+    if (!any) { cairo_set_source_rgb(cr,.4,.4,.4); cairo_move_to(cr,20,35); cairo_show_text(cr,"No nonzero indexed sizes in this directory"); }
+}
+static Tile *map_hit(Ui *u, double x, double y)
+{
+    for (guint i = 0; i < u->tiles->len; i++) {
+        Tile *t = &g_array_index(u->tiles, Tile, i); th_rect r = t->rect;
+        if (x >= r.x && x < r.x+r.width && y >= r.y && y < r.y+r.height) return t;
+    }
+    return NULL;
+}
+static gboolean map_tooltip(GtkWidget *widget, int x, int y, gboolean keyboard, GtkTooltip *tip, gpointer data)
+{
+    (void)widget; (void)keyboard; Tile *t = map_hit(data, x, y); if (!t) return FALSE;
+    char *path = g_utf8_make_valid(t->row->path, -1), *size = g_format_size((guint64)t->weight);
+    char *text = g_strdup_printf("%s\n%s\n%s",t->row->text[0],path,size); gtk_tooltip_set_text(tip,text);
+    g_free(text); g_free(path); g_free(size); return TRUE;
+}
+static void map_pressed(GtkGestureClick *gesture, int presses, double x, double y, gpointer data)
+{
+    (void)gesture; (void)presses; Ui *u = data; Tile *t = map_hit(u,x,y); if (!t || !t->row->id) return;
+    Row *r = t->row;
+    if (!strcmp(r->type,"dir")) navigate(u,r->root,r->id,r->path,r->size);
+    else { char *uri = g_filename_to_uri(r->path,NULL,NULL); if (uri) { g_app_info_launch_default_for_uri_async(uri,NULL,NULL,NULL,NULL); g_free(uri); } }
+}
+static gboolean map_smoke_navigate(gpointer data)
+{
+    Ui *u = data;
+    for (guint i = 0; i < u->tiles->len; i++) {
+        Tile *t = &g_array_index(u->tiles, Tile, i);
+        if (!strcmp(t->row->type,"dir") && t->rect.width > 0 && t->rect.height > 0) {
+            map_pressed(NULL,1,t->rect.x+t->rect.width*.5,t->rect.y+t->rect.height*.5,u); return G_SOURCE_REMOVE;
+        }
+    }
+    u->smoke_failed = true; g_application_quit(G_APPLICATION(u->app)); return G_SOURCE_REMOVE;
+}
+static void tab_changed(GObject *object, GParamSpec *param, gpointer data) { (void)object; (void)param; query(data); }
+
 static void received(GObject *source, GAsyncResult *result, gpointer data)
 {
     (void)source; Ui *u = data; GTask *task = G_TASK(result); Work *w = g_task_get_task_data(task);
@@ -170,8 +264,12 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
                 if (!g_list_model_get_n_items(G_LIST_MODEL(u->model))) u->smoke_failed = true;
                 u->smoke_stage++;
                 if (u->smoke_stage == 1) gtk_editable_set_text(GTK_EDITABLE(u->search), "smoke");
-                else if (u->smoke_stage == 2) g_application_quit(G_APPLICATION(u->app));
+                else if (u->smoke_stage == 2) gtk_stack_set_visible_child_name(GTK_STACK(u->stack), "treemap");
             }
+        } else if (w->kind == 7) {
+            map_populate(u, res);
+            if (u->smoke && u->smoke_stage == 2) { u->smoke_stage = 3; if (!u->tiles->len) u->smoke_failed = true; }
+            else if (u->smoke && u->smoke_stage == 4) { u->smoke_stage = 5; if (!u->tiles->len) u->smoke_failed = true; g_application_quit(G_APPLICATION(u->app)); }
         } else if (w->kind == 6) {
             const th_jval *items = th_json_get(res, "items");
             if (items && items->n) { const th_jval *v = &items->items[0]; navigate(u, th_json_get_int(v, "root_id", 0), th_json_get_int(v, "id", 0), th_json_get_str(v, "path", ""), th_json_get_int(v, "size", 0)); }
@@ -202,6 +300,11 @@ static void submit(Ui *u, char *request, guint kind)
 static void query(Ui *u)
 {
     if (!u->parent || u->closing) return;
+    if (!strcmp(gtk_stack_get_visible_child_name(GTK_STACK(u->stack)), "treemap")) {
+        char *request = g_strdup_printf("{\"v\":1,\"cmd\":\"treemap\",\"parent_id\":%lld,\"metric\":\"%s\",\"show_hidden\":%s}", (long long)u->parent,
+            gtk_drop_down_get_selected(u->metric) ? "allocated" : "logical", gtk_check_button_get_active(GTK_CHECK_BUTTON(u->hidden)) ? "true" : "false");
+        submit(u, request, 7); return;
+    }
     const char *text = gtk_editable_get_text(GTK_EDITABLE(u->search));
     th_strbuf b; th_sb_init(&b); th_jw w; th_jw_init(&w, &b); th_jw_obj_begin(&w);
     th_jw_kv_int(&w, "v", 1); th_jw_kv_str(&w, "cmd", *text ? "search" : "list");
@@ -231,7 +334,7 @@ static void query(Ui *u)
     char *valid = g_utf8_make_valid(u->path, -1); gtk_label_set_text(GTK_LABEL(u->breadcrumb), valid); g_free(valid);
     submit(u, g_strdup(b.data), 2); th_sb_free(&b);
 }
-static void changed(GtkWidget *widget, gpointer data) { (void)widget; Ui *u = data; u->offset = 0; query(u); }
+static void changed(GtkWidget *widget, gpointer data) { Ui *u = data; u->offset = 0; if (widget == u->search && *gtk_editable_get_text(GTK_EDITABLE(u->search))) gtk_stack_set_visible_child_name(GTK_STACK(u->stack),"explorer"); query(u); }
 static void dropdown_changed(GObject *object, GParamSpec *param, gpointer data) { (void)object; (void)param; changed(NULL, data); }
 static void refresh(GtkButton *button, gpointer data) { (void)button; submit(data, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1); }
 static void up(GtkButton *button, gpointer data)
@@ -333,10 +436,14 @@ static void preferences(Ui *u, bool save)
     if (save) {
         for (size_t i = 0; i < 5; i++) g_key_file_set_boolean(key, "view", names[i], gtk_check_button_get_active(GTK_CHECK_BUTTON(widgets[i])));
         g_key_file_set_integer(key, "view", "sort", (int)gtk_drop_down_get_selected(u->sort));
+        g_key_file_set_integer(key, "view", "metric", (int)gtk_drop_down_get_selected(u->metric));
+        g_key_file_set_string(key, "view", "page", gtk_stack_get_visible_child_name(GTK_STACK(u->stack)));
         gsize n; char *text = g_key_file_to_data(key, &n, NULL); char *dir = th_config_dir(); th_mkdir_p(dir, 0700); free(dir);
         th_write_file_atomic(path, text, n, 0600); g_free(text);
     } else if (g_key_file_load_from_file(key, path, G_KEY_FILE_NONE, NULL)) {
         for (size_t i = 0; i < 5; i++) gtk_check_button_set_active(GTK_CHECK_BUTTON(widgets[i]), g_key_file_get_boolean(key, "view", names[i], NULL));
+        if (g_key_file_has_key(key,"view","metric",NULL)) gtk_drop_down_set_selected(u->metric,g_key_file_get_integer(key,"view","metric",NULL) == 0 ? 0u : 1u);
+        char *page = g_key_file_get_string(key,"view","page",NULL); if (page && !strcmp(page,"treemap")) gtk_stack_set_visible_child_name(GTK_STACK(u->stack),page); g_free(page);
         int sort = g_key_file_get_integer(key, "view", "sort", NULL); if (sort >= 0 && sort < 5) gtk_drop_down_set_selected(u->sort, (guint)sort);
     }
     g_key_file_unref(key); free(path);
@@ -387,7 +494,16 @@ static void activate(GtkApplication *app, gpointer data)
         gtk_column_view_column_set_fixed_width(c, i == 0 ? 170 : i == 1 ? 220 : i == 6 ? 145 : 100);
         gtk_column_view_append_column(GTK_COLUMN_VIEW(u->view), c); g_object_unref(c);
     }
-    GtkWidget *scroll = gtk_scrolled_window_new(); gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), u->view); gtk_paned_set_end_child(GTK_PANED(paned), scroll);
+    GtkWidget *scroll = gtk_scrolled_window_new(); gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), u->view); u->stack = gtk_stack_new(); gtk_stack_add_titled(GTK_STACK(u->stack), scroll, "explorer", "Explorer / Search");
+    u->map = gtk_drawing_area_new(); gtk_widget_set_hexpand(u->map,true); gtk_widget_set_vexpand(u->map,true);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(u->map), map_draw, u, NULL);
+    gtk_widget_set_has_tooltip(u->map,true); g_signal_connect(u->map,"query-tooltip",G_CALLBACK(map_tooltip),u);
+    GtkGesture *click = gtk_gesture_click_new(); g_signal_connect(click,"pressed",G_CALLBACK(map_pressed),u); gtk_widget_add_controller(u->map,GTK_EVENT_CONTROLLER(click));
+    gtk_stack_add_titled(GTK_STACK(u->stack),u->map,"treemap","Treemap"); gtk_paned_set_end_child(GTK_PANED(paned),u->stack);
+    GtkWidget *switcher = gtk_stack_switcher_new(); gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher),GTK_STACK(u->stack)); gtk_box_append(GTK_BOX(nav),switcher);
+    const char *metrics[] = {"Logical", "Allocated", NULL}; u->metric = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(metrics)); gtk_drop_down_set_selected(u->metric,1);
+    gtk_box_append(GTK_BOX(nav),GTK_WIDGET(u->metric)); g_signal_connect(u->metric,"notify::selected",G_CALLBACK(tab_changed),u);
+    g_signal_connect(u->stack,"notify::visible-child-name",G_CALLBACK(tab_changed),u);
     GtkWidget *footer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6); gtk_box_append(GTK_BOX(box), footer);
     GtkWidget *prev = button(footer, "Previous", G_CALLBACK(page), u); g_object_set_data(G_OBJECT(prev), "direction", GINT_TO_POINTER(-1));
     GtkWidget *next = button(footer, "Next", G_CALLBACK(page), u); g_object_set_data(G_OBJECT(next), "direction", GINT_TO_POINTER(1));
@@ -402,16 +518,18 @@ static void ui_free(gpointer data)
 {
     Ui *u = data;
     for (guint i = 0; i < u->history->len; i++) free(g_array_index(u->history, Location, i).path);
+    map_clear(u); g_array_unref(u->tiles);
     g_clear_object(&u->model); g_clear_object(&u->selection); g_array_unref(u->history);
     free(u->socket); free(u->path); g_free(u->pending); g_free(u);
 }
 int th_gui_run(int argc, char **argv)
 {
     Ui *u = g_new0(Ui, 1); u->socket = th_socket_path(); u->history = g_array_new(false, false, sizeof(Location));
+    u->tiles = g_array_new(false, false, sizeof(Tile));
     u->smoke = g_getenv("TREEHOUND_GUI_SMOKE") != NULL;
     GtkApplication *app = gtk_application_new("io.github.blindicide.treehound", G_APPLICATION_NON_UNIQUE); u->app = app;
     g_object_set_data_full(G_OBJECT(app), "ui", u, ui_free); g_signal_connect(app, "activate", G_CALLBACK(activate), u);
-    int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 2)) result = 4;
+    int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 5)) result = 4;
     u->closing = true; if (u->retry_source) g_source_remove(u->retry_source); if (u->smoke_source) g_source_remove(u->smoke_source);
     g_object_unref(app); return result;
 }

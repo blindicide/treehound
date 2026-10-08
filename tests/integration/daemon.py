@@ -53,6 +53,10 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         assert r["ok"] and r["used_index"] and len(r["items"]) == 1, r
         assert len(call("list", parent_id=roots[0]["entry_id"])["items"]) == 6
         assert not call("list")["ok"]
+        assert not call("treemap")["ok"]
+        tree = call("treemap", parent_id=roots[0]["entry_id"], metric="logical")
+        assert tree["ok"] and tree["children"] == 6 and len(tree["items"]) == 6 and tree["other_count"] == 0, tree
+        assert not call("treemap", parent_id=roots[0]["entry_id"], metric="unknown")["ok"]
         assert call("search", query="hello space.txt", exact=True)["items"][0]["name"] == "hello space.txt"
         assert not call("search", query="hello", exact=True)["items"]
         assert call("search", extension="pdf")["items"][0]["name"] == "unicodé.pdf"
@@ -78,6 +82,13 @@ with tempfile.TemporaryDirectory(prefix="th-") as tmp:
         assert wait_idle()["completed_seq"] >= seq
         assert not call("search", query="hello")["items"]
         assert call("search", query="renamed")["items"]
+        bulk = root / "bulk"; bulk.mkdir()
+        for i in range(600): (bulk / f"item-{i}.dat").write_bytes(b"x")
+        seq = call("verify")["seq"]; assert wait_idle()["completed_seq"] >= seq
+        directory = call("search", query=str(bulk), exact=True)["items"][0]
+        tree = call("treemap", parent_id=directory["id"], metric="logical")
+        assert tree["children"] == 600 and len(tree["items"]) == 512 and tree["other_count"] == 88 and tree["other_weight"] == 88, tree
+        assert tree["total_weight"] == 600
         second = subprocess.run(command, capture_output=True, timeout=5)
         assert second.returncode == 3
     finally:

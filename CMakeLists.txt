@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 # The single authoritative version.  Everything else (binaries, packages,
 # --version, release tag checks) derives from here.
 project(treehound
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Indexed file search and disk-usage explorer for Linux"
     HOMEPAGE_URL "https://github.com/blindicide/treehound"
     LANGUAGES C)
@@ -41,6 +41,7 @@ configure_file(include/treehound/version.h.in
 
 # ---- th_base: shared by every program; no SQLite, no GTK -------------------
 add_library(th_base STATIC
+    src/core/treemap.c
     src/core/strbuf.c
     src/core/json.c
     src/core/utf8.c

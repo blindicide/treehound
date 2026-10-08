@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-10-08
+
+- Interactive Cairo treemap: indexed directory scope, logical/allocated metrics, type colors, byte-safe path tooltips and directory click navigation.
+- Bounded 512-child IPC, exact remainder statistics and tiny-item aggregation; event-driven redraw only.
+- Proportional area/non-overlap layout tests, real 600-child IPC aggregation and GTK geometry-driven navigation smoke.
+- Remember the selected view and metric alongside search preferences.
+
 ## 0.2.0 — 2026-10-08
 
 - Live indexing milestone: coalesced updates, stable same-root moves, multi-root overflow recovery, restart reconciliation and atomic background configuration.

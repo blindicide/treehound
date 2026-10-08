@@ -44,8 +44,7 @@ all roots recover. Global recovery generations are consumed separately by each
 root, so an unrelated pending directory diff cannot hide lost events. Offline
 roots retain cached searchable entries with an Offline state. SIGKILL/restart
 reconciles offline edits and passes SQLite integrity checking. Special filesystem
-and mount namespace behavior still require dedicated validation. Treemap,
-history and million-entry measurements follow in subsequent releases.
+and mount namespace behavior still require dedicated validation. History and million-entry measurements follow in subsequent releases.
 
 ## Command-line client
 
@@ -54,3 +53,16 @@ history and million-entry measurements follow in subsequent releases.
 ## GTK client
 
 The client links `th_base` and GTK, never the database engine. A GTask worker issues bounded IPC calls; the main thread updates a virtualized GtkColumnView backed by at most 200 records. One running request and one replacement request bound rapid typing work. Response generation numbers discard obsolete replies. Directory navigation stores indexed identities and byte paths. Search is debounced by GtkSearchEntry. Root state appears in sidebar and result status; refresh is explicit. A real Xvfb test browses a fixture and searches it through the daemon.
+
+## Treemap
+
+The daemon reads a consistent SQLite snapshot and returns at most 512 immediate
+children ordered by the selected logical/allocated metric, plus an exact count
+and weight for all remaining children. Duplicate hard-link file weights are zero;
+directory weights use the index aggregates. The GUI aggregates weights below
+0.1% into Other and draws a balanced binary layout with Cairo. Tooltips retain
+raw paths for actions and use replacement characters only for display. Clicking
+a directory changes the indexed scope; Back/Up and Explorer remain available
+for tiny or zero-size entries. Resize, scope changes and explicit refresh trigger
+redraw; there is no animation timer. Allocated sizes have the same compression,
+reflink and hard-link accounting caveats as the explorer.

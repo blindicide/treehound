@@ -7,6 +7,7 @@ function(th_unit_test name)
 endfunction()
 
 th_unit_test(test_core th_base)
+th_unit_test(test_treemap th_base m)
 th_unit_test(test_ipc th_base Threads::Threads)
 th_unit_test(test_db th_engine)
 th_unit_test(test_indexer th_engine)

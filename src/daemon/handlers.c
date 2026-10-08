@@ -31,6 +31,47 @@ static void entry_json(th_jw *w, const th_entry *e, int state)
     th_jw_kv_int(w, "mtime", e->mtime); th_jw_kv_int(w, "flags", e->flags);
     th_jw_kv_str(w, "status", th_state_name(state)); th_jw_obj_end(w);
 }
+static int treemap_reply(sqlite3 *db, const th_jval *q, th_jw *w)
+{
+    int64_t parent = th_json_get_int(q, "parent_id", 0);
+    const char *metric = th_json_get_str(q, "metric", "allocated");
+    if (parent <= 0 || (strcmp(metric, "allocated") && strcmp(metric, "logical"))) return -1;
+    const char *weight = !strcmp(metric, "allocated") ?
+        "CASE WHEN e.type=1 THEN e.agg_alloc WHEN e.flags & 8 THEN 0 ELSE e.alloc END" :
+        "CASE WHEN e.type=1 THEN e.agg_size WHEN e.flags & 8 THEN 0 ELSE e.size END";
+    th_strbuf sql; th_sb_init(&sql);
+    int rc = -1; sqlite3_stmt *st = NULL; th_root root = {0}; th_entry directory = {0};
+    if (th_db_exec(db, "BEGIN") != 0) goto done;
+    if (th_db_entry_get(db, parent, &directory) != 1 || directory.type != TH_TYPE_DIR ||
+        th_db_root_get(db, directory.root_id, &root) != 1) goto rollback;
+    bool hidden = th_json_get_bool(q, "show_hidden", true);
+    const char *where = " FROM entries e WHERE e.parent_id=?1 AND (?2 OR substr(e.name,1,1)<>'.')";
+    th_sb_printf(&sql, "SELECT count(*),coalesce(sum(%s),0)%s", weight, where);
+    st = th_db_prepare(db, sql.data); if (!st) goto rollback;
+    sqlite3_bind_int64(st, 1, parent); sqlite3_bind_int(st, 2, hidden);
+    if (sqlite3_step(st) != SQLITE_ROW) goto rollback;
+    int64_t count = sqlite3_column_int64(st, 0), total = sqlite3_column_int64(st, 1), shown = 0, sum = 0;
+    sqlite3_finalize(st); st = NULL; th_sb_reset(&sql);
+    th_jw_kv_int(w, "children", count); th_jw_kv_int(w, "total_weight", total); th_jw_kv_str(w, "metric", metric);
+    th_jw_kv_str(w, "status", th_state_name(root.state));
+    th_sb_printf(&sql, "SELECT " TH_ENTRY_COLS ",%s AS weight%s ORDER BY weight DESC,e.id LIMIT 512", weight, where);
+    st = th_db_prepare(db, sql.data); if (!st) goto rollback;
+    sqlite3_bind_int64(st, 1, parent); sqlite3_bind_int(st, 2, hidden);
+    th_jw_key(w, "items"); th_jw_arr_begin(w);
+    int step;
+    while ((step = sqlite3_step(st)) == SQLITE_ROW) {
+        th_entry e = {0}; th_entry_from_stmt(&e, st, 0); int64_t size = sqlite3_column_int64(st, TH_ENTRY_NCOLS);
+        entry_json(w, &e, root.state); th_entry_clear(&e); sum += size; shown++;
+    }
+    if (step != SQLITE_DONE) goto rollback;
+    th_jw_arr_end(w); th_jw_kv_int(w, "other_count", count - shown); th_jw_kv_int(w, "other_weight", total - sum);
+    rc = 0;
+rollback:
+    th_db_exec(db, "ROLLBACK");
+done:
+    sqlite3_finalize(st); th_entry_clear(&directory); th_root_clear(&root); th_sb_free(&sql); return rc;
+}
+
 static bool valid_strings(const th_jval *v)
 {
     if (v->type == TH_JSTR && memchr(v->str, 0, v->len)) return false;
@@ -77,6 +118,8 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
             th_jw_kv_int(&w, "last_verified", r->last_verified); th_jw_obj_end(&w);
         }
         th_jw_arr_end(&w); th_roots_free(roots, n);
+    } else if (!strcmp(cmd, "treemap")) {
+        if (treemap_reply(*db, q, &w) != 0) { failure(out, "request", "invalid treemap scope or database query failed"); goto done; }
     } else if (!strcmp(cmd, "search") || !strcmp(cmd, "list")) {
         th_search_opts o; th_search_opts_init(&o);
         o.query = th_json_get_str(q, "query", "");
