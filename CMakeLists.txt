@@ -57,6 +57,7 @@ add_library(th_engine STATIC
     src/database/db.c
     src/indexer/indexer.c
     src/indexer/mounts.c
+    src/search/search.c
 )
 target_link_libraries(th_engine PUBLIC th_base SQLite::SQLite3 Threads::Threads)
 
