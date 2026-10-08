@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Actual GTK window, async indexed browsing, treemap navigation and history capture under Xvfb."""
-import os, re, pathlib, subprocess, sys, tempfile, time
+import base64, configparser, os, re, pathlib, subprocess, sys, tempfile, time
 with tempfile.TemporaryDirectory(prefix="th-gui-") as tmp:
     base = pathlib.Path(tmp)
     root = base / "files"; root.mkdir()
@@ -19,7 +19,11 @@ with tempfile.TemporaryDirectory(prefix="th-gui-") as tmp:
         time.sleep(.1)
         gui = subprocess.run(["xvfb-run", "-a", "dbus-run-session", "--", sys.argv[2]], env=env, capture_output=True, timeout=20)
         assert gui.returncode == 0, (gui.returncode, gui.stdout, gui.stderr)
-        app_diagnostics = [line for line in gui.stderr.splitlines() if re.search(rb"\(treehound[: -]", line)]
+        prefs=configparser.ConfigParser();prefs.read(cfg / "gui.conf")
+        assert base64.b64decode(prefs["navigation"]["bookmarks"].rstrip(';')).decode()==str(root)
+        again=subprocess.run(["xvfb-run","-a","dbus-run-session","--",sys.argv[2]],env=env,capture_output=True,timeout=20)
+        assert again.returncode==0,(again.returncode,again.stderr)
+        app_diagnostics = [line for line in (gui.stderr+again.stderr).splitlines() if re.search(rb"\(treehound[: -]", line)]
         assert not any(b"CRITICAL" in line or b"WARNING" in line for line in app_diagnostics), gui.stderr
     finally:
         daemon.terminate(); assert daemon.wait(timeout=5) == 0

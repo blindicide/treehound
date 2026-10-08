@@ -19,7 +19,7 @@ typedef struct { Row *row; double weight; th_rect rect; } Tile;
 typedef struct { int64_t root, parent, size; char *path; } Location;
 typedef struct {
     GtkApplication *app;
-    GtkWidget *window, *roots, *search, *status, *breadcrumb, *view, *settings, *config_text;
+    GtkWidget *window, *roots, *bookmarks, *mounts, *search, *status, *breadcrumb, *view, *settings, *config_text;
     GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before, *exact, *global;
     GtkDropDown *sort, *types, *metric;
     GtkWidget *stack, *map, *history_chart, *history_text; GArray *tiles, *snapshots;
@@ -28,13 +28,46 @@ typedef struct {
     char *socket, *path, *pending;
     int64_t root, parent, parent_size, offset;
     guint generation, pending_kind, smoke_stage, retry_source, smoke_source;
-    bool busy, closing, smoke, smoke_failed;
+    bool busy, closing, smoke, smoke_failed, benchmark, mounts_loaded;
+    GPtrArray *saved_paths;
+    double launched, mapped;
     GArray *history;
 } Ui;
 typedef struct { char *request, *socket; guint generation, kind; bool start; } Work;
 static void query(Ui *u);
 static void show_settings(Ui *u, const char *text);
 static void submit(Ui *u, char *request, guint kind);
+static void preferences(Ui *u, bool save);
+static void path_clicked(GtkButton *button, gpointer data)
+{
+    Ui *u=data; const char *path=g_object_get_data(G_OBJECT(button),"path");
+    th_strbuf b;th_sb_init(&b);th_jw w;th_jw_init(&w,&b);th_jw_obj_begin(&w);
+    th_jw_kv_int(&w,"v",1);th_jw_kv_str(&w,"cmd","search");th_jw_kv_bytes(&w,"query",path,strlen(path));
+    th_jw_kv_bool(&w,"exact",true);th_jw_kv_str(&w,"type","dir");th_jw_kv_int(&w,"limit",1);th_jw_obj_end(&w);
+    submit(u,g_strdup(b.data),6);th_sb_free(&b);
+}
+static GtkWidget *path_button(GtkWidget *box,const char *path,const char *suffix,Ui *u)
+{
+    char *valid=g_utf8_make_valid(path,-1),*label=g_strdup_printf("%s%s%s",valid,*suffix?" · ":"",suffix);
+    GtkWidget *b=gtk_button_new_with_label(label);GtkLabel *caption=GTK_LABEL(gtk_button_get_child(GTK_BUTTON(b)));
+    gtk_label_set_ellipsize(caption,PANGO_ELLIPSIZE_MIDDLE);gtk_label_set_max_width_chars(caption,24);gtk_widget_set_tooltip_text(b,label);
+    g_object_set_data_full(G_OBJECT(b),"path",g_strdup(path),g_free);g_signal_connect(b,"clicked",G_CALLBACK(path_clicked),u);
+    gtk_box_append(GTK_BOX(box),b);g_free(valid);g_free(label);return b;
+}
+static void bookmarks_refresh(Ui *u)
+{
+    GtkWidget *child;while((child=gtk_widget_get_first_child(u->bookmarks)))gtk_box_remove(GTK_BOX(u->bookmarks),child);
+    for(guint i=0;i<u->saved_paths->len;i++)path_button(u->bookmarks,g_ptr_array_index(u->saved_paths,i),"",u);
+}
+static void bookmark_clicked(GtkButton *button,gpointer data)
+{
+    (void)button;Ui *u=data;if(!u->path)return;
+    guint i;for(i=0;i<u->saved_paths->len;i++)if(!strcmp(g_ptr_array_index(u->saved_paths,i),u->path))break;
+    if(i<u->saved_paths->len)g_ptr_array_remove_index(u->saved_paths,i);
+    else if(u->saved_paths->len<64)g_ptr_array_add(u->saved_paths,g_strdup(u->path));
+    else {gtk_label_set_text(GTK_LABEL(u->status),"Bookmark limit reached (64)");return;}
+    bookmarks_refresh(u);preferences(u,true);
+}
 static gboolean retry_roots(gpointer data) { Ui *u = data; u->retry_source = 0; if (!u->closing) submit(u, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1); return G_SOURCE_REMOVE; }
 static void row_free(gpointer data)
 {
@@ -70,11 +103,13 @@ static void worker(GTask *task, gpointer source, gpointer data, GCancellable *ca
     }
     if (res && w->kind == 9 && th_json_get_bool(res,"ok",false)) {
         int64_t seq = th_json_get_int(res,"seq",0);
-        for (int i=0; i<200; i++) {
+        double deadline=th_mono_sec()+120.; bool complete=false;
+        while (th_mono_sec()<deadline) {
             th_jval *status = th_ipc_call(w->socket,"{\"v\":1,\"cmd\":\"status\"}",strlen("{\"v\":1,\"cmd\":\"status\"}"),1000,&err);
-            bool complete = status && th_json_get_int(status,"completed_seq",0)>=seq;
-            th_json_free(status); if (complete) break; g_usleep(50000);
+            complete = status && th_json_get_int(status,"completed_seq",0)>=seq;
+            th_json_free(status); if (complete) break; g_usleep(100000);
         }
+        if (!complete) { th_json_free(res); res=NULL; th_sb_reset(&err); th_sb_puts(&err,"Snapshot is still queued; refresh History after verification completes"); }
     }
     if (!res) g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "%s", err.data ? err.data : "Daemon unavailable");
     else g_task_return_pointer(task, res, (GDestroyNotify)th_json_free);
@@ -304,11 +339,27 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
                 (long long)(u->offset / 200 + 1), th_json_get_double(res, "elapsed_ms", 0),
                 th_json_get_bool(res, "used_index", false) ? "trigram index" : "indexed records");
             gtk_label_set_text(GTK_LABEL(u->status), text); g_free(text);
+            if (!u->mounts_loaded && !u->benchmark) { submit(u,g_strdup("{\"v\":1,\"cmd\":\"mounts\"}"),10); }
+            if (u->benchmark) {
+                g_print("{\"window_mapped_ms\":%.3f,\"indexed_listing_ms\":%.3f}\n",u->mapped*1000,(th_mono_sec()-u->launched)*1000);
+                g_application_quit(G_APPLICATION(u->app));
+            }
             if (u->smoke) {
                 if (!g_list_model_get_n_items(G_LIST_MODEL(u->model))) u->smoke_failed = true;
                 u->smoke_stage++;
-                if (u->smoke_stage == 1) gtk_editable_set_text(GTK_EDITABLE(u->search), "smoke");
+                if (u->smoke_stage == 1) {
+                    if (!u->saved_paths->len) bookmark_clicked(NULL,u);
+                    if (u->saved_paths->len!=1 || strcmp(g_ptr_array_index(u->saved_paths,0),u->path))u->smoke_failed=true;
+                    gtk_editable_set_text(GTK_EDITABLE(u->search),"smoke");
+                }
                 else if (u->smoke_stage == 2) gtk_stack_set_visible_child_name(GTK_STACK(u->stack), "treemap");
+            }
+        } else if (w->kind == 10) {
+            u->mounts_loaded=true;
+            GtkWidget *child;while((child=gtk_widget_get_first_child(u->mounts)))gtk_box_remove(GTK_BOX(u->mounts),child);
+            const th_jval *mounts=th_json_get(res,"mounts");if(mounts)for(size_t i=0;i<mounts->n;i++) {
+                const th_jval *v=&mounts->items[i];if(!th_json_get_bool(v,"accessible",false))continue;
+                path_button(u->mounts,th_json_get_str(v,"path",""),th_json_get_str(v,"filesystem",""),u);
             }
         } else if (w->kind == 7) {
             map_populate(u, res);
@@ -322,6 +373,7 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
         } else if (w->kind == 6) {
             const th_jval *items = th_json_get(res, "items");
             if (items && items->n) { const th_jval *v = &items->items[0]; navigate(u, th_json_get_int(v, "root_id", 0), th_json_get_int(v, "id", 0), th_json_get_str(v, "path", ""), th_json_get_int(v, "size", 0)); }
+            else gtk_label_set_text(GTK_LABEL(u->status),"Directory is outside the index; add an accessible root in Settings.");
         } else if (w->kind == 4) {
             show_settings(u, th_json_get_str(res, "config", ""));
         } else if (w->kind == 5) {
@@ -402,15 +454,27 @@ static void page(GtkButton *button, gpointer data)
     if (direction > 0 && g_list_model_get_n_items(G_LIST_MODEL(u->model)) < 200) return;
     u->offset = MAX(0, u->offset + direction * 200); query(u);
 }
+static void opened(GObject *source, GAsyncResult *result, gpointer data)
+{
+    (void)source; GtkApplication *app=data; Ui *u=g_object_get_data(G_OBJECT(app),"ui");
+    GError *error=NULL;
+    if(!g_app_info_launch_default_for_uri_finish(result,&error) && u && !u->closing)
+        gtk_label_set_text(GTK_LABEL(u->status),error->message);
+    g_clear_error(&error);g_object_unref(app);
+}
+static void open_path(Ui *u,const char *path)
+{
+    GError *error=NULL;char *uri=g_filename_to_uri(path,NULL,&error);
+    if(uri)g_app_info_launch_default_for_uri_async(uri,NULL,NULL,opened,g_object_ref(u->app));
+    if(error)gtk_label_set_text(GTK_LABEL(u->status),error->message);
+    g_clear_error(&error);g_free(uri);
+}
 static void activate_row(GtkColumnView *view, guint position, gpointer data)
 {
     (void)view; Ui *u = data; GObject *obj = g_list_model_get_item(G_LIST_MODEL(u->model), position); Row *r = row_of(obj);
     if (r && !strcmp(r->type, "dir")) navigate(u, r->root, r->id, r->path, r->size);
     else if (r) {
-        GError *error = NULL; char *uri = g_filename_to_uri(r->path, NULL, &error);
-        if (uri) g_app_info_launch_default_for_uri(uri, NULL, &error);
-        if (error) gtk_label_set_text(GTK_LABEL(u->status), error->message);
-        g_clear_error(&error); g_free(uri);
+        open_path(u,r->path);
     }
     g_clear_object(&obj);
 }
@@ -420,10 +484,7 @@ static void selected_action(GtkButton *button, gpointer data)
     const char *action = g_object_get_data(G_OBJECT(button), "action");
     if (!strcmp(action, "copy")) { gdk_clipboard_set_text(gtk_widget_get_clipboard(u->window), r->text[1]); return; }
     if (!strcmp(action, "open")) { activate_row(GTK_COLUMN_VIEW(u->view), gtk_single_selection_get_selected(u->selection), u); return; }
-    char *dir = g_path_get_dirname(r->path); GError *error = NULL; char *uri = g_filename_to_uri(dir, NULL, &error);
-    if (uri) g_app_info_launch_default_for_uri(uri, NULL, &error);
-    if (error) gtk_label_set_text(GTK_LABEL(u->status), error->message);
-    g_clear_error(&error); g_free(uri); g_free(dir);
+    char *dir = g_path_get_dirname(r->path);open_path(u,dir);g_free(dir);
 }
 static void back(GtkButton *button, gpointer data)
 {
@@ -489,6 +550,9 @@ static void preferences(Ui *u, bool save)
         g_key_file_set_integer(key, "view", "sort", (int)gtk_drop_down_get_selected(u->sort));
         g_key_file_set_integer(key, "view", "metric", (int)gtk_drop_down_get_selected(u->metric));
         g_key_file_set_string(key, "view", "page", gtk_stack_get_visible_child_name(GTK_STACK(u->stack)));
+        char **encoded=g_new0(char *,u->saved_paths->len+1);
+        for(guint i=0;i<u->saved_paths->len;i++) { const char *p=g_ptr_array_index(u->saved_paths,i);encoded[i]=g_base64_encode((const guchar *)p,strlen(p)); }
+        g_key_file_set_string_list(key,"navigation","bookmarks",(const gchar *const *)encoded,u->saved_paths->len);g_strfreev(encoded);
         gsize n; char *text = g_key_file_to_data(key, &n, NULL); char *dir = th_config_dir(); th_mkdir_p(dir, 0700); free(dir);
         th_write_file_atomic(path, text, n, 0600); g_free(text);
     } else if (g_key_file_load_from_file(key, path, G_KEY_FILE_NONE, NULL)) {
@@ -497,14 +561,25 @@ static void preferences(Ui *u, bool save)
         char *page = g_key_file_get_string(key,"view","page",NULL); if (page && (!strcmp(page,"treemap") || !strcmp(page,"history"))) gtk_stack_set_visible_child_name(GTK_STACK(u->stack),page); g_free(page);
         int sort = g_key_file_get_integer(key, "view", "sort", NULL); if (sort >= 0 && sort < 5) gtk_drop_down_set_selected(u->sort, (guint)sort);
     }
+    if (!save) {
+        gsize n=0;char **encoded=g_key_file_get_string_list(key,"navigation","bookmarks",&n,NULL);
+        for(gsize i=0;encoded && i<MIN(n,64);i++) { gsize length=0;guchar *raw=g_base64_decode(encoded[i],&length);
+            if(length>0 && length<4096 && raw[0]=='/' && !memchr(raw,0,length))
+                g_ptr_array_add(u->saved_paths,g_strndup((const char *)raw,length));
+            g_free(raw);
+        }
+        g_strfreev(encoded);bookmarks_refresh(u);
+    }
     g_key_file_unref(key); free(path);
 }
 static gboolean close_window(GtkWindow *window, gpointer data) { (void)window; Ui *u = data; preferences(u, true); u->closing = true; return FALSE; }
 static gboolean smoke_timeout(gpointer data) { Ui *u = data; u->smoke_source = 0; u->smoke_failed = true; g_application_quit(G_APPLICATION(u->app)); return G_SOURCE_REMOVE; }
+static void mapped(GtkWidget *widget, gpointer data) { (void)widget; Ui *u=data; if (!u->mapped) u->mapped=th_mono_sec()-u->launched; }
 static void activate(GtkApplication *app, gpointer data)
 {
     Ui *u = data; u->window = gtk_application_window_new(app); gtk_window_set_title(GTK_WINDOW(u->window), "Treehound " TH_VERSION);
     gtk_window_set_default_size(GTK_WINDOW(u->window), 1180, 720);
+    g_signal_connect(u->window, "map", G_CALLBACK(mapped), u);
     g_signal_connect(u->window, "close-request", G_CALLBACK(close_window), u);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8); gtk_window_set_child(GTK_WINDOW(u->window), box);
     gtk_widget_set_margin_start(box, 12); gtk_widget_set_margin_end(box, 12); gtk_widget_set_margin_top(box, 12); gtk_widget_set_margin_bottom(box, 12);
@@ -532,7 +607,12 @@ static void activate(GtkApplication *app, gpointer data)
     u->breadcrumb = gtk_label_new("Indexed roots"); gtk_label_set_ellipsize(GTK_LABEL(u->breadcrumb), PANGO_ELLIPSIZE_START); gtk_label_set_xalign(GTK_LABEL(u->breadcrumb), 0);
     gtk_widget_set_hexpand(u->breadcrumb, true); gtk_box_append(GTK_BOX(nav), u->breadcrumb);
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL); gtk_widget_set_vexpand(paned, true); gtk_box_append(GTK_BOX(box), paned);
-    u->roots = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6); gtk_widget_set_size_request(u->roots, 205, -1); gtk_paned_set_start_child(GTK_PANED(paned), u->roots);
+    GtkWidget *sidebar=gtk_box_new(GTK_ORIENTATION_VERTICAL,6),*side_scroll=gtk_scrolled_window_new();
+    gtk_widget_set_size_request(side_scroll,205,-1);gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(side_scroll),sidebar);gtk_paned_set_start_child(GTK_PANED(paned),side_scroll);
+    path_button(sidebar,g_get_home_dir(),"Home",u);button(sidebar,"Bookmark / remove current",G_CALLBACK(bookmark_clicked),u);
+    gtk_box_append(GTK_BOX(sidebar),gtk_label_new("Indexed roots"));u->roots=gtk_box_new(GTK_ORIENTATION_VERTICAL,6);gtk_box_append(GTK_BOX(sidebar),u->roots);
+    gtk_box_append(GTK_BOX(sidebar),gtk_label_new("Bookmarks"));u->bookmarks=gtk_box_new(GTK_ORIENTATION_VERTICAL,6);gtk_box_append(GTK_BOX(sidebar),u->bookmarks);
+    gtk_box_append(GTK_BOX(sidebar),gtk_label_new("Mounted filesystems"));u->mounts=gtk_box_new(GTK_ORIENTATION_VERTICAL,6);gtk_box_append(GTK_BOX(sidebar),u->mounts);
     gtk_paned_set_resize_start_child(GTK_PANED(paned), false);
     u->model = g_list_store_new(G_TYPE_OBJECT); u->selection = gtk_single_selection_new(G_LIST_MODEL(g_object_ref(u->model)));
     u->view = gtk_column_view_new(GTK_SELECTION_MODEL(g_object_ref(u->selection))); gtk_column_view_set_show_column_separators(GTK_COLUMN_VIEW(u->view), true);
@@ -575,13 +655,15 @@ static void ui_free(gpointer data)
     for (guint i = 0; i < u->history->len; i++) free(g_array_index(u->history, Location, i).path);
     map_clear(u); g_array_unref(u->tiles); g_array_unref(u->snapshots);
     g_clear_object(&u->model); g_clear_object(&u->selection); g_array_unref(u->history);
-    free(u->socket); free(u->path); g_free(u->pending); g_free(u);
+    g_ptr_array_unref(u->saved_paths);free(u->socket); free(u->path); g_free(u->pending); g_free(u);
 }
 int th_gui_run(int argc, char **argv)
 {
     Ui *u = g_new0(Ui, 1); u->socket = th_socket_path(); u->history = g_array_new(false, false, sizeof(Location));
+    u->saved_paths=g_ptr_array_new_with_free_func(g_free);
     u->tiles = g_array_new(false, false, sizeof(Tile)); u->snapshots = g_array_new(false,false,sizeof(Snapshot));
     u->smoke = g_getenv("TREEHOUND_GUI_SMOKE") != NULL;
+    u->benchmark = g_getenv("TREEHOUND_GUI_BENCHMARK") != NULL; u->launched=th_mono_sec();
     GtkApplication *app = gtk_application_new("io.github.blindicide.treehound", G_APPLICATION_NON_UNIQUE); u->app = app;
     g_object_set_data_full(G_OBJECT(app), "ui", u, ui_free); g_signal_connect(app, "activate", G_CALLBACK(activate), u);
     int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 7)) result = 4;
