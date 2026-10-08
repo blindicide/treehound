@@ -62,7 +62,7 @@ and mount namespace behavior still require dedicated validation. Actual million-
 
 ## GTK client
 
-The client links `th_base` and GTK, never the database engine. A GTask worker issues bounded IPC calls; the main thread updates a virtualized GtkColumnView backed by at most 200 records. One running request and one replacement request bound rapid typing work. Response generation numbers discard obsolete replies. Directory navigation stores indexed identities and byte paths. Search is debounced by GtkSearchEntry. Root state appears in sidebar and result status; refresh is explicit. Home, accessible mounts and up to 64 byte-safe bookmarks navigate through indexed directory identities. Opening files/folders uses asynchronous GIO. A real Xvfb test browses a fixture and searches it through the daemon.
+The client links `th_base` and GTK, never the database engine. A GTask worker issues bounded IPC calls; the main thread updates a virtualized GtkColumnView backed by at most 200 records. One running request and one replaceable read request bound rapid typing work. Verification, settings-save and snapshot actions use a separate FIFO bounded to 64 queued actions; they run before coalesced reads. Response generation numbers discard obsolete reads while accepted actions retain their completion callbacks. Directory navigation stores indexed identities and byte paths. Search is debounced by GtkSearchEntry. Root state appears in sidebar and result status; refresh is explicit. Home, accessible mounts and up to 64 byte-safe bookmarks navigate through indexed directory identities. Opening files/folders uses asynchronous GIO. A real Xvfb test browses a fixture and searches it through the daemon.
 
 ## Treemap
 

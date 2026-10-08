@@ -41,7 +41,7 @@ def call(cmd,**kw):
 def memory():
     values={line.split(':')[0]:int(line.split()[1])*1024 for line in pathlib.Path(f'/proc/{daemon.pid}/status').read_text().splitlines() if line.startswith(('VmRSS:','VmHWM:'))}
     return values
-report=dict(binary_sha256={name:hashlib.sha256((build/name).read_bytes()).hexdigest() for name in ('treehoundd','treehound')},version=subprocess.check_output([str(build/'treehoundd'),'--version'],text=True).strip(),count=count,platform=platform.platform(),fixture_seconds=fixture_seconds,filesystem=subprocess.check_output(['stat','-f','-c','%T',str(root)],text=True).strip(),cpu_count=os.cpu_count(),initial_scan=initial_scan)
+report=dict(head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),working_tree_dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True)),binary_sha256={name:hashlib.sha256((build/name).read_bytes()).hexdigest() for name in ('treehoundd','treehound')},version=subprocess.check_output([str(build/'treehoundd'),'--version'],text=True).strip(),count=count,platform=platform.platform(),fixture_seconds=fixture_seconds,filesystem=subprocess.check_output(['stat','-f','-c','%T',str(root)],text=True).strip(),cpu_count=os.cpu_count(),initial_scan=initial_scan)
 try:
     peak=0
     while time.monotonic()-start<1800:
@@ -62,6 +62,7 @@ try:
         call('search',query=query,limit=200)
         t0=time.perf_counter();result=call('search',query=query,limit=200);ms=(time.perf_counter()-t0)*1000
         assert result['ok'] and result['used_index'],result
+        assert len(result['items'])<=200 and all(query.casefold() in item['name'].casefold() or query.casefold() in item['path'].casefold() for item in result['items']),result
         samples.append(dict(query=query,length=len(query),ms=ms,returned=len(result['items']),engine_ms=result.get('elapsed_ms')))
     report['search_samples']=samples
     report['search_p95_ms_by_length']={str(n): sorted(x['ms'] for x in samples if x['length']==n)[28] for n in (3,6)}
@@ -69,6 +70,17 @@ try:
     for query in ('item','dat','it'):
         t0=time.perf_counter();result=call('search',query=query,limit=200);broad.append(dict(query=query,ms=(time.perf_counter()-t0)*1000,ok=result['ok'],error=result.get('error'),returned=len(result.get('items',[]))))
     report['broad_searches']=broad
+    pages=[];seen=set();report['pagination_samples']=pages
+    for offset in (x for x in (0,200,400,10000) if x+200<=count):
+        t0=time.perf_counter();result=call('search',query='item',limit=200,offset=offset,sort='name')
+        pages.append(dict(offset=offset,returned=len(result.get('items',[])),ms=(time.perf_counter()-t0)*1000,ok=result['ok'],error=result.get('error')))
+        if not result['ok']:continue
+        assert len(result['items'])==200,result
+        identifiers={item['id'] for item in result['items']}
+        assert len(identifiers)==200 and not identifiers.intersection(seen), 'overlapping search pages'
+        assert all('item' in item['name'] for item in result['items']), 'nonmatching search page'
+        seen.update(identifiers)
+    report['pagination_samples']=pages
     def ticks():
         fields=pathlib.Path(f'/proc/{daemon.pid}/stat').read_text().rsplit(')',1)[1].split();return int(fields[11])+int(fields[12])
     cpu0=ticks();t0=time.monotonic();time.sleep(10);elapsed=time.monotonic()-t0
@@ -86,5 +98,9 @@ try:
     report['measured_at_utc']=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
     (base/(index_name+'-results.json')).write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k not in ('search_samples','roots')},indent=2),flush=True)
+except Exception as error:
+    report.update(incomplete=True,failure=str(error),measured_at_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()))
+    (base/(index_name+'-failed-results.json')).write_text(json.dumps(report,indent=2)+'\n')
+    raise
 finally:
     daemon.terminate();daemon.wait(timeout=15);log.close()

@@ -46,6 +46,20 @@ labels this filesystem “ext2/ext3”; the live mount table identifies ext4.
 The repeatable fixture/measurement harness is `tests/benchmarks/million.py`;
 see [BUILDING.md](BUILDING.md). Retained local fixture/index data are not packaged.
 
+## Continuation: deep pagination
+
+The prepared 0.5.1 search plan timed out at offset 10,000 on the retained
+million-file index: 1,001.00 ms, with no returned page. A bounded FTS probe now
+selects ordered filename-index streaming with exact term/filter matching; it
+avoids redundant per-row FTS posting-list lookups. The uncontended patched
+probe returned 200 distinct matching rows at offsets 0, 200, 400 and 10,000
+in 6.08, 4.73, 4.08 and 12.63 ms respectively. These are individual requests,
+not p95 estimates. [Raw baseline and dirty-candidate provenance](benchmarks/v0.5-deep-pagination.json)
+records executable hashes, base commits and the exact changed file list. The
+benchmark harness also retains partial failure evidence and checks page IDs.
+The one-second query guard remains; arbitrary deep offsets or expensive filters
+can still require refining the query.
+
 ## Correctness and remaining validation gaps
 
 Tests exercise actual sparse files, multiple hard-link paths, invalid UTF-8,

@@ -62,7 +62,7 @@ typedef struct {
     th_entry *items;
     size_t n;
     int64_t total;   /* -1 when not computed */
-    bool used_index; /* the FTS index narrowed the candidates */
+    bool used_index; /* FTS candidates or broad-match ordered-index streaming */
     double elapsed_ms;
     bool timed_out;  /* th_search() failed because timeout_ms elapsed */
 } th_search_result;

@@ -2,6 +2,8 @@
 
 ## 0.5.1 — 2026-10-09
 
+- Broad filename pagination streams the ordered index with exact matching, avoiding redundant per-row FTS probes. Real million-entry offset 10,000 changed from a one-second timeout to 12.63ms/200 matching rows; baseline and candidate hashes retained.
+
 - GUI verification, settings saves and snapshot actions retain submission order in a bounded queue while read requests coalesce. Rapid snapshot clicks followed by a refresh no longer silently discard accepted actions; the actual GTK smoke test checks all three captures.
 
 - The daemon initializes UTF-8 character folding before worker threads, fixing non-ASCII case-insensitive searches in service environments using the C locale. Actual IPC tests cover trigram, short-query fallback and case-sensitive behavior.

@@ -253,8 +253,8 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
 
     fts_query_terms(&terms, &fts);
     /* Probe only a bounded posting prefix. Broad matches can then stream the
-     * ordered filename index, testing FTS membership per candidate instead of
-     * materializing and sorting a million rowids before returning one page. */
+     * ordered filename index with exact matching instead of materializing and
+     * sorting a million rowids or reopening their posting list per candidate. */
     bool broad = false;
     if (o->timeout_ms > 0)
         sqlite3_progress_handler(db, 1000, deadline_cb, &deadline);
@@ -334,11 +334,14 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
         push_text(&params, hi.data, hi.len);
     }
 
-    if (fts.len) {
-        th_sb_puts(&where, broad ? " AND EXISTS (SELECT 1 FROM entries_fts WHERE rowid=e.id AND entries_fts MATCH ?)" : " AND e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)");
+    if (fts.len && !broad) {
+        th_sb_puts(&where, " AND e.id IN (SELECT rowid FROM entries_fts WHERE entries_fts MATCH ?)");
         push_text(&params, fts.data, fts.len);
         res->used_index = true;
     }
+    /* th_match already enforces every term, including wildcard/case rules.
+     * Broad FTS membership adds no filtering and grows costly with OFFSET. */
+    if (broad) res->used_index = true;
 
     int64_t limit = o->limit;
     if (limit <= 0 || limit > TH_MAX_PAGE)
@@ -347,6 +350,7 @@ int th_search(sqlite3 *db, const th_search_opts *o, th_search_result *res, th_st
 
     th_sb_puts(&sql, "SELECT " TH_ENTRY_COLS " FROM entries e");
     if(o->parent_id>=0)th_sb_puts(&sql," INDEXED BY entries_parent");
+    else if(broad)th_sb_puts(&sql," INDEXED BY entries_name");
     th_sb_append(&sql, where.data, where.len);
     order_clause(&sql, o->sort, o->descending);
     th_sb_puts(&sql, " LIMIT ? OFFSET ?");

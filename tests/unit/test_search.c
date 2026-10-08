@@ -454,7 +454,12 @@ static void test_timeout(void)
     CHECK(r.used_index); CHECK_INT(r.n,3);
     CHECK_STR(r.items[0].name,"bulk10"); CHECK_STR(r.items[1].name,"bulk100");
     th_search_result_free(&r);
-    o.descending = true; o.offset = 0;
+    o.offset = 10000; o.timeout_ms = 1000;
+    th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
+    CHECK_INT(r.n,3); CHECK(!r.timed_out);
+    CHECK_STR(r.items[0].name,"bulk108999");
+    th_search_result_free(&r);
+    o.timeout_ms = 60000; o.descending = true; o.offset = 0;
     th_sb_reset(&err); CHECK_INT(th_search(db,&o,&r,&err),0);
     CHECK_STR(r.items[0].name,"bulk99999"); th_search_result_free(&r);
     o.descending = false; o.under = "/absent";
