@@ -27,7 +27,10 @@ python3 tests/benchmarks/million.py build /path/to/isolated-output 1000000 initi
 This creates one million actual files, launches the real daemon, queries its IPC,
 measures Linux process memory/CPU and runs ten GTK launches under Xvfb. It needs
 at least 1,002,000 free inodes and approximately 3 GB of space; fixtures, databases
-and JSON evidence remain available for inspection. Reusing an index name measures
-startup reconciliation; a new name measures initial indexing. Do not run competing
+and JSON evidence remain available for inspection. An existing database without
+a success/failure report for that name measures startup reconciliation; a fresh
+name measures initial indexing. Once a report exists, that name is rejected to
+preserve evidence. Choose a fresh output/name for subsequent runs. Reports include
+main database, WAL and shared-memory storage at measurement time. Do not run competing
 heavy tests while measuring. See [PERFORMANCE.md](PERFORMANCE.md) for measured
 results and the limits of virtualized-host measurements.
