@@ -16,6 +16,9 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_test(NAME integration.daemon COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/integration/daemon.py $<TARGET_FILE:treehoundd> $<TARGET_FILE:treehound>)
 set_tests_properties(integration.daemon PROPERTIES LABELS integration TIMEOUT 60)
+add_test(NAME integration.scan_progress COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/integration/scan_progress.py $<TARGET_FILE:treehoundd>)
+set_tests_properties(integration.scan_progress PROPERTIES LABELS integration TIMEOUT 40)
 
 if(TREEHOUND_BUILD_GUI)
     find_program(XVFB_RUN xvfb-run)

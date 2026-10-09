@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2 — 2026-10-09 (source patch, not published)
+
+- The GTK window labels the first scan of each configured root and shows scanned-entry counts with an indeterminate progress bar. Cached indexes remain distinguishable while startup reconciliation runs; completed, interrupted, offline and failed first scans have explicit messages.
+- The daemon exposes per-root scan progress over IPC using its existing throttled scanner callback. First-scan detection uses the persisted successful-scan timestamp, so a partial interrupted index is not mistaken for a complete cached index.
+
 ## 0.5.1 — 2026-10-09
 
 - Broad filename pagination streams the ordered index with exact matching, avoiding redundant per-row FTS probes. Real million-entry offset 10,000 changed from a one-second timeout to 12.63ms/200 matching rows; baseline and candidate hashes retained.

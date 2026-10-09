@@ -58,6 +58,7 @@ with tempfile.TemporaryDirectory(prefix="treehound-scan-fault-") as directory:
         assert call("search", query="other")["items"], "partial scan lost sibling"
         current = call("roots")["roots"][0]
         assert current["status"] == "stale", current
+        assert not current["first_scan"] and not current["scan_active"], current
         assert call("verify", root_id=current["id"])["ok"]
         idle()
         recovered = call("search", query="cached-marker")["items"][0]

@@ -19,7 +19,7 @@ typedef struct { Row *row; double weight; th_rect rect; } Tile;
 typedef struct { int64_t root, parent, size; char *path; } Location;
 typedef struct {
     GtkApplication *app;
-    GtkWidget *window, *roots, *bookmarks, *mounts, *search, *status, *breadcrumb, *view, *settings, *config_text;
+    GtkWidget *window, *roots, *bookmarks, *mounts, *search, *status, *scan_label, *scan_progress, *breadcrumb, *view, *settings, *config_text;
     GtkWidget *hidden, *sensitive, *descending, *extension, *minimum, *maximum, *after, *before, *exact, *global;
     GtkDropDown *sort, *types, *metric;
     GtkWidget *stack, *map, *history_chart, *history_text; GArray *tiles, *snapshots;
@@ -27,9 +27,10 @@ typedef struct {
     GtkSingleSelection *selection;
     char *socket, *path, *pending;
     int64_t root, parent, parent_size, offset;
-    guint generation, pending_kind, smoke_stage, retry_source, smoke_source;
+    guint generation, pending_kind, smoke_stage, retry_source, smoke_source, scan_pulse_source;
     bool busy, closing, smoke, smoke_failed, benchmark, mounts_loaded;
     GPtrArray *saved_paths;
+    GHashTable *observed_first_scans, *completed_first_scans;
     GQueue *actions;
     double launched, mapped;
     GArray *history;
@@ -72,6 +73,12 @@ static void bookmark_clicked(GtkButton *button,gpointer data)
     bookmarks_refresh(u);preferences(u,true);
 }
 static gboolean retry_roots(gpointer data) { Ui *u = data; u->retry_source = 0; if (!u->closing) submit(u, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1); return G_SOURCE_REMOVE; }
+static gboolean pulse_scan(gpointer data)
+{
+    Ui *u = data;
+    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(u->scan_progress));
+    return G_SOURCE_CONTINUE;
+}
 static void row_free(gpointer data)
 {
     Row *r = data;
@@ -309,13 +316,22 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
 {
     (void)source; Ui *u = data; GTask *task = G_TASK(result); Work *w = g_task_get_task_data(task);
     GError *error = NULL; th_jval *res = g_task_propagate_pointer(task, &error);
+    if (w->kind == 9 && !u->closing) {
+        gtk_widget_set_visible(u->scan_label, false);
+        gtk_widget_set_visible(u->scan_progress, false);
+        if (u->scan_pulse_source) { g_source_remove(u->scan_pulse_source); u->scan_pulse_source = 0; }
+        if (!u->retry_source) u->retry_source = g_timeout_add(250, retry_roots, u);
+    }
     if (!u->closing && (mutation(w->kind) || w->generation == u->generation)) {
         if (!res || !th_json_get_bool(res, "ok", false)) {
             gtk_label_set_text(GTK_LABEL(u->status), error ? error->message : th_json_get_str(res, "error", "Request failed"));
             if (u->smoke) u->smoke_failed = true;
         } else if (w->kind == 1) {
             GtkWidget *child; while ((child = gtk_widget_get_first_child(u->roots))) gtk_box_remove(GTK_BOX(u->roots), child);
-            bool updating = false;
+            bool updating = false, scanning = false;
+            char *summary = NULL, *scan_path = NULL;
+            int summary_priority = 0;
+            int64_t scan_entries = 0;
             const th_jval *roots = th_json_get(res, "roots");
             if (roots) for (size_t i = 0; i < roots->n; i++) {
                 const th_jval *v = &roots->items[i]; Row *r = g_new0(Row, 1);
@@ -323,8 +339,45 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
                 r->size = th_json_get_int(v, "size", 0); r->path = th_xstrdup(th_json_get_str(v, "path", ""));
                 char *valid = g_utf8_make_valid(r->path, -1);
                 const char *state = th_json_get_str(v, "status", "indexed");
-                updating |= !strcmp(state, "indexed") || !strcmp(state, "updating");
-                char *label = g_strdup_printf("%s\n%s · %s", valid, state, th_json_get_str(v, "error", ""));
+                const char *error_text = th_json_get_str(v, "error", "");
+                bool first = th_json_get_bool(v, "first_scan", false);
+                bool active = th_json_get_bool(v, "scan_active", false);
+                bool queued = th_json_get_bool(v, "scan_queued", false);
+                bool interrupted = th_json_get_bool(v, "scan_interrupted", false);
+                bool completed_first = false;
+                int64_t root_id = r->root;
+                if (active) g_hash_table_remove(u->completed_first_scans, &root_id);
+                if (first) {
+                    g_hash_table_remove(u->completed_first_scans, &root_id);
+                    if (!g_hash_table_contains(u->observed_first_scans, &root_id)) {
+                        int64_t *key = g_new(int64_t, 1); *key = root_id;
+                        g_hash_table_add(u->observed_first_scans, key);
+                    }
+                } else if (!strcmp(state, "verified")) {
+                    if (g_hash_table_remove(u->observed_first_scans, &root_id)) {
+                        int64_t *key = g_new(int64_t, 1); *key = root_id;
+                        g_hash_table_add(u->completed_first_scans, key);
+                    }
+                    completed_first = g_hash_table_contains(u->completed_first_scans, &root_id);
+                }
+                updating |= !strcmp(state, "indexed") || !strcmp(state, "updating") || active || queued;
+                char *label = g_strdup_printf("%s\n%s · %s", valid, first ? "First scan" : state, error_text);
+                int priority = active ? 5 : interrupted ? 4 : first ? 3 : queued || !strcmp(state, "indexed") || !strcmp(state, "updating") ? 2 : completed_first ? 1 : !strcmp(state, "verified") ? 0 : 1;
+                if (priority > summary_priority) {
+                    g_free(summary); g_free(scan_path);
+                    summary_priority = priority; scanning = active;
+                    scan_entries = th_json_get_int(v, "scan_entries", 0);
+                    scan_path = g_utf8_make_valid(th_json_get_str(v, "scan_path", ""), -1);
+                    if (active) summary = g_strdup_printf("%s configured root %s: %lld entries scanned%s",
+                        first ? "First scan of" : "Reconciling", valid, (long long)scan_entries,
+                        first ? "" : "; cached index remains available");
+                    else if (interrupted) summary = g_strdup_printf("%s of %s interrupted; partial index may be available. Verify to resume.", first ? "First scan" : "Scan", valid);
+                    else if (first && (!strcmp(state, "error") || !strcmp(state, "offline") || (!strcmp(state, "stale") && *error_text))) summary = g_strdup_printf("First scan of %s failed: %s", valid, *error_text ? error_text : state);
+                    else if (first) summary = g_strdup_printf("First scan pending for configured root %s; no complete index yet.", valid);
+                    else if (queued || !strcmp(state, "indexed") || !strcmp(state, "updating")) summary = g_strdup_printf("Cached index for %s; reconciliation pending.", valid);
+                    else if (completed_first) summary = g_strdup_printf("First scan complete for configured root %s; index verified.", valid);
+                    else summary = g_strdup_printf("Index for %s is %s%s%s", valid, state, *error_text ? ": " : "", error_text);
+                }
                 GtkWidget *b = gtk_button_new_with_label(label);
                 GtkLabel *caption = GTK_LABEL(gtk_button_get_child(GTK_BUTTON(b))); gtk_label_set_ellipsize(caption, PANGO_ELLIPSIZE_MIDDLE); gtk_label_set_max_width_chars(caption, 24);
                 g_free(label); g_free(valid);
@@ -333,6 +386,19 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
                 if (!u->parent && r->id && i == 0) navigate(u, r->root, r->id, r->path, r->size);
                 else if (u->parent == r->id) u->parent_size = r->size;
             }
+            gtk_widget_set_visible(u->scan_label, summary != NULL);
+            gtk_label_set_text(GTK_LABEL(u->scan_label), summary ? summary : "");
+            gtk_widget_set_tooltip_text(u->scan_label, scanning && scan_path && *scan_path ? scan_path : NULL);
+            gtk_widget_set_visible(u->scan_progress, scanning);
+            if (scanning) {
+                char *count = g_strdup_printf("%lld entries scanned", (long long)scan_entries);
+                gtk_progress_bar_set_text(GTK_PROGRESS_BAR(u->scan_progress), count);
+                g_free(count);
+                if (!u->scan_pulse_source) u->scan_pulse_source = g_timeout_add(250, pulse_scan, u);
+            } else if (u->scan_pulse_source) {
+                g_source_remove(u->scan_pulse_source); u->scan_pulse_source = 0;
+            }
+            g_free(summary); g_free(scan_path);
             if (updating && !u->retry_source) u->retry_source = g_timeout_add(1000, retry_roots, u);
             if (u->parent) query(u);
         } else if (w->kind == 2) {
@@ -382,7 +448,11 @@ static void received(GObject *source, GAsyncResult *result, gpointer data)
             gtk_label_set_text(GTK_LABEL(u->status), th_json_get_bool(res, "restart_required", false) ?
                 "Saved; restart daemon to change watch coverage. Other changes reconcile now." : "Saved; roots and exclusions are reconciling. Reopen to refresh sidebar.");
             if (u->settings) { gtk_window_destroy(GTK_WINDOW(u->settings)); u->settings = NULL; }
-        } else { gtk_label_set_text(GTK_LABEL(u->status), "Verification queued; refresh to view progress."); }
+            if (!u->retry_source) u->retry_source = g_timeout_add(250, retry_roots, u);
+        } else {
+            gtk_label_set_text(GTK_LABEL(u->status), "Verification queued; scan progress will appear below.");
+            if (!u->retry_source) u->retry_source = g_timeout_add(250, retry_roots, u);
+        }
     }
     th_json_free(res); g_clear_error(&error);
     u->busy = false;
@@ -415,7 +485,14 @@ static void start_work(Ui *u, Work *w)
 {
     w->socket = g_strdup(u->socket); w->start = w->kind == 1;
     GTask *task = g_task_new(u->app, NULL, received, u); g_task_set_task_data(task, w, work_free);
-    u->busy = true; gtk_label_set_text(GTK_LABEL(u->status), "Loading indexed data…");
+    u->busy = true; gtk_label_set_text(GTK_LABEL(u->status), w->kind == 9 ? "Verifying root before snapshot…" : "Loading indexed data…");
+    if (w->kind == 9) {
+        gtk_label_set_text(GTK_LABEL(u->scan_label), "Verifying configured root before snapshot; progress is indeterminate.");
+        gtk_widget_set_visible(u->scan_label, true);
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(u->scan_progress), "Verifying…");
+        gtk_widget_set_visible(u->scan_progress, true);
+        if (!u->scan_pulse_source) u->scan_pulse_source = g_timeout_add(250, pulse_scan, u);
+    }
     g_task_run_in_thread(task, worker); g_object_unref(task);
 }
 static void query(Ui *u)
@@ -665,6 +742,11 @@ static void activate(GtkApplication *app, gpointer data)
     const char *actions[] = {"open", "folder", "copy"}; const char *labels[] = {"Open", "Open folder", "Copy path"};
     for (size_t i = 0; i < 3; i++) { GtkWidget *b = button(footer, labels[i], G_CALLBACK(selected_action), u); g_object_set_data(G_OBJECT(b), "action", (gpointer)actions[i]); }
     u->status = gtk_label_new("Connecting…"); gtk_label_set_xalign(GTK_LABEL(u->status), 0); gtk_box_append(GTK_BOX(box), u->status);
+    u->scan_label = gtk_label_new(NULL); gtk_label_set_xalign(GTK_LABEL(u->scan_label), 0);
+    gtk_label_set_wrap(GTK_LABEL(u->scan_label), true); gtk_widget_set_visible(u->scan_label, false);
+    gtk_box_append(GTK_BOX(box), u->scan_label);
+    u->scan_progress = gtk_progress_bar_new(); gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(u->scan_progress), true);
+    gtk_widget_set_visible(u->scan_progress, false); gtk_box_append(GTK_BOX(box), u->scan_progress);
     preferences(u, false);
     gtk_window_present(GTK_WINDOW(u->window)); submit(u, g_strdup("{\"v\":1,\"cmd\":\"roots\"}"), 1);
     if (u->smoke) u->smoke_source = g_timeout_add_seconds(10, smoke_timeout, u);
@@ -676,12 +758,16 @@ static void ui_free(gpointer data)
     map_clear(u); g_array_unref(u->tiles); g_array_unref(u->snapshots);
     g_clear_object(&u->model); g_clear_object(&u->selection); g_array_unref(u->history);
     g_queue_free_full(u->actions, work_free);
-    g_ptr_array_unref(u->saved_paths);free(u->socket); free(u->path); g_free(u->pending); g_free(u);
+    g_ptr_array_unref(u->saved_paths); g_hash_table_unref(u->observed_first_scans);
+    g_hash_table_unref(u->completed_first_scans);
+    free(u->socket); free(u->path); g_free(u->pending); g_free(u);
 }
 int th_gui_run(int argc, char **argv)
 {
     Ui *u = g_new0(Ui, 1); u->socket = th_socket_path(); u->history = g_array_new(false, false, sizeof(Location));
     u->saved_paths=g_ptr_array_new_with_free_func(g_free); u->actions=g_queue_new();
+    u->observed_first_scans = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+    u->completed_first_scans = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
     u->tiles = g_array_new(false, false, sizeof(Tile)); u->snapshots = g_array_new(false,false,sizeof(Snapshot));
     u->smoke = g_getenv("TREEHOUND_GUI_SMOKE") != NULL;
     u->benchmark = g_getenv("TREEHOUND_GUI_BENCHMARK") != NULL; u->launched=th_mono_sec();
@@ -689,5 +775,6 @@ int th_gui_run(int argc, char **argv)
     g_object_set_data_full(G_OBJECT(app), "ui", u, ui_free); g_signal_connect(app, "activate", G_CALLBACK(activate), u);
     int result = g_application_run(G_APPLICATION(app), argc, argv); if (u->smoke && (u->smoke_failed || u->smoke_stage != 7)) result = 4;
     u->closing = true; if (u->retry_source) g_source_remove(u->retry_source); if (u->smoke_source) g_source_remove(u->smoke_source);
+    if (u->scan_pulse_source) g_source_remove(u->scan_pulse_source);
     g_object_unref(app); return result;
 }

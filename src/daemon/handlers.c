@@ -114,6 +114,22 @@ void daemon_handle(th_daemon *d, sqlite3 **db, const char *req, size_t len, th_s
             th_jw_kv_int(&w, "id", r->id); th_jw_kv_int(&w, "entry_id", r->entry_id);
             th_jw_kv_str(&w, "path", r->path); th_jw_kv_str(&w, "status", th_state_name(monitor_pending(r->id) && r->state == TH_STATE_VERIFIED ? TH_STATE_UPDATING : r->state));
             th_jw_kv_str(&w, "error", r->error ? r->error : "");
+            th_jw_kv_bool(&w, "first_scan", r->last_scan_end == 0);
+            th_jw_kv_bool(&w, "scan_interrupted", r->scan_in_progress && r->state == TH_STATE_STALE && (!r->error || !*r->error));
+            pthread_mutex_lock(&d->mu);
+            bool scanning = d->busy && (d->current.kind == JOB_SCAN || d->current.kind == JOB_REBUILD) && d->current.root_id == r->id;
+            bool queued = false;
+            for (size_t queued_index = 0; queued_index < d->nqueue; queued_index++) {
+                job *pending = &d->queue[queued_index];
+                if ((pending->kind == JOB_SCAN || pending->kind == JOB_REBUILD) && pending->root_id == r->id) {
+                    queued = true; break;
+                }
+            }
+            th_jw_kv_bool(&w, "scan_active", scanning);
+            th_jw_kv_bool(&w, "scan_queued", queued);
+            th_jw_kv_int(&w, "scan_entries", scanning ? d->current_stats.entries : 0);
+            th_jw_kv_str(&w, "scan_path", scanning && d->current_path ? d->current_path : "");
+            pthread_mutex_unlock(&d->mu);
             th_jw_kv_int(&w, "size", r->total_size); th_jw_kv_int(&w, "allocated", r->total_alloc);
             th_jw_kv_int(&w, "files", r->total_files); th_jw_kv_int(&w, "directories", r->total_dirs);
             th_jw_kv_int(&w, "last_verified", r->last_verified); th_jw_obj_end(&w);

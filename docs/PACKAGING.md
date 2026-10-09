@@ -6,6 +6,10 @@ Each native job builds all targets with warnings as errors, runs CTest including
 
 Only after both native jobs succeed does a matching SemVer tag publish both packages and SHA256SUMS through GitHub Actions. Manual uploading is not the normal path. A workflow file alone does not establish successful package validation; inspect the actual run and assets.
 
+The examples below install the last published v0.5.1 packages, not a v0.5.2
+artifact. Build v0.5.2 packages locally with CPack if needed; no release assets
+are claimed for this source patch.
+
 ```sh
 sudo apt install ./treehound_0.5.1_amd64.deb
 sudo dnf install ./treehound-0.5.1-1.x86_64.rpm

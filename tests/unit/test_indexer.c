@@ -466,12 +466,17 @@ static void test_cancel_and_large(void)
     REQUIRE(th_db_root_get(db, rid, &r) == 1);
     CHECK_INT(r.state, TH_STATE_STALE);
     CHECK(r.scan_in_progress);
+    CHECK_INT(r.last_scan_end, 0);
     th_root_clear(&r);
 
     /* a full scan afterwards completes with small batches */
     memset(&o, 0, sizeof o);
     o.batch_rows = 13;
     CHECK_INT(scan(db, rid, &o, NULL), TH_SCAN_OK);
+    REQUIRE(th_db_root_get(db, rid, &r) == 1);
+    CHECK(r.last_scan_end > 0);
+    CHECK(!r.scan_in_progress);
+    th_root_clear(&r);
     CHECK_INT(th_db_entry_count(db), 1 + 20 + 2000);
     th_entry e;
     memset(&e, 0, sizeof e);
