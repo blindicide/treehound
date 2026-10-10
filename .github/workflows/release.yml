@@ -28,6 +28,8 @@ jobs:
             dnf install -y git gcc cmake make pkgconf-pkg-config gtk4-devel sqlite-devel python3 xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon procps-ng rpm-build file curl
           fi
       - uses: actions/checkout@v4
+      - name: Test release notes extractor
+        run: python3 -m unittest discover -s scripts -p 'test_release_notes.py' -v
       - name: Check authoritative version and tag
         id: version
         shell: bash
@@ -38,6 +40,16 @@ jobs:
             test "$GITHUB_REF_NAME" = "v$version"
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Validate matching release notes before packaging
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          tag="v$VERSION"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+          python3 scripts/extract-release-notes.py --tag "$tag" --output "$RUNNER_TEMP/release-notes.md"
       - name: Build and test every target
         shell: bash
         run: |
@@ -76,6 +88,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Generate version-specific release notes
+        run: python3 scripts/extract-release-notes.py --tag "$GITHUB_REF_NAME" --output "$RUNNER_TEMP/release-notes.md"
       - uses: actions/download-artifact@v4
         with:
           pattern: package-*
@@ -89,4 +103,4 @@ jobs:
           test "$(find artifacts -name '*.deb' | wc -l)" = 1
           test "$(find artifacts -name '*.rpm' | wc -l)" = 1
           (cd artifacts && sha256sum *.deb *.rpm > SHA256SUMS)
-          gh release create "$GITHUB_REF_NAME" artifacts/* --verify-tag --title "Treehound $GITHUB_REF_NAME" --notes-file CHANGELOG.md
+          gh release create "$GITHUB_REF_NAME" artifacts/* --verify-tag --title "Treehound $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
